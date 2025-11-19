@@ -1,4 +1,4 @@
-name: CI Pipeline
+name: CI
 
 on:
   push:
@@ -7,106 +7,62 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Cancel in-progress runs for the same workflow + branch/PR
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
+  pull-requests: write  # For PR comments
 
 jobs:
-  lint:
-    name: Linting & Type Checking
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-        with:
-          enable-cache: true
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-
-      - name: Install dependencies
-        run: uv sync --all-extras
-
-      - name: Run ruff linting
-        run: ruff check src/ tests/
-
-      - name: Run ruff formatting check
-        run: ruff format --check src/ tests/
-
-      - name: Run mypy type checking
-        run: mypy src/pythermacell/
-
-  test:
-    name: Unit Tests
-    runs-on: ubuntu-latest
+  # Run lint and unit tests in parallel on multiple Python versions
+  test-matrix:
+    name: Test Suite
     strategy:
+      fail-fast: false
       matrix:
         python-version: ["3.13", "3.14"]
-    steps:
-      - uses: actions/checkout@v4
+    uses: ./.github/workflows/test.yml
+    with:
+      python-version: ${{ matrix.python-version }}
+      run-integration: false
+    secrets:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-        with:
-          enable-cache: true
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-          allow-prereleases: true
-
-      - name: Install dependencies
-        run: uv sync --all-extras
-
-      - name: Run unit tests
-        run: |
-          pytest tests/ -m "not integration and not manual" \
-            --cov=pythermacell \
-            --cov-report=term-missing \
-            --cov-report=xml \
-            --cov-report=html
-
-      - name: Upload coverage reports
-        uses: codecov/codecov-action@v4
-        if: matrix.python-version == '3.13'
-        with:
-          file: ./coverage.xml
-          flags: unittests
-          name: codecov-umbrella
-          fail_ci_if_error: false
-
-  integration-test:
+  # Integration tests run after unit tests pass
+  # Only on PRs and main branch, requires manual approval
+  integration-tests:
     name: Integration Tests
-    runs-on: ubuntu-latest
-    needs: [lint, test]
-    # Run on PRs to main and on main branch pushes
+    needs: test-matrix
     if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/test.yml
+    with:
+      python-version: "3.13"
+      run-integration: true
     environment: integration-tests
+    secrets:
+      THERMACELL_USERNAME: ${{ secrets.THERMACELL_USERNAME }}
+      THERMACELL_PASSWORD: ${{ secrets.THERMACELL_PASSWORD }}
+      THERMACELL_API_BASE_URL: ${{ secrets.THERMACELL_API_BASE_URL }}
+      THERMACELL_TEST_NODE_ID: ${{ secrets.THERMACELL_TEST_NODE_ID }}
+
+  # All checks passed
+  ci-success:
+    name: CI Success
+    runs-on: ubuntu-latest
+    needs: [test-matrix, integration-tests]
+    if: always()
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-        with:
-          enable-cache: true
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-
-      - name: Install dependencies
-        run: uv sync --all-extras
-
-      - name: Run integration tests
-        env:
-          THERMACELL_USERNAME: ${{ secrets.THERMACELL_USERNAME }}
-          THERMACELL_PASSWORD: ${{ secrets.THERMACELL_PASSWORD }}
-          THERMACELL_API_BASE_URL: ${{ secrets.THERMACELL_API_BASE_URL }}
-          THERMACELL_TEST_NODE_ID: ${{ secrets.THERMACELL_TEST_NODE_ID }}
+      - name: Check all jobs
         run: |
-          pytest tests/integration/ -v --tb=short
+          if [[ "${{ needs.test-matrix.result }}" != "success" ]]; then
+            echo "Test matrix failed"
+            exit 1
+          fi
+          if [[ "${{ needs.integration-tests.result }}" != "success" && "${{ needs.integration-tests.result }}" != "skipped" ]]; then
+            echo "Integration tests failed"
+            exit 1
+          fi
+          echo "All CI checks passed!"

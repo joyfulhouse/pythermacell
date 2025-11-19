@@ -1,0 +1,156 @@
+# Reusable workflow for testing
+name: Test
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        required: false
+        type: string
+        default: "3.13"
+      run-integration:
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      THERMACELL_USERNAME:
+        required: false
+      THERMACELL_PASSWORD:
+        required: false
+      THERMACELL_API_BASE_URL:
+        required: false
+      THERMACELL_TEST_NODE_ID:
+        required: false
+      CODECOV_TOKEN:
+        required: false
+
+jobs:
+  lint:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python
+        run: uv python install ${{ inputs.python-version }}
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Run ruff linting
+        run: uv run ruff check src/ tests/
+
+      - name: Run ruff formatting check
+        run: uv run ruff format --check src/ tests/
+
+      - name: Run mypy type checking
+        run: uv run mypy src/pythermacell/
+
+  test:
+    name: Unit Tests (Python ${{ inputs.python-version }})
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python
+        run: uv python install ${{ inputs.python-version }}
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Run unit tests
+        run: |
+          uv run pytest tests/ -m "not integration and not manual" \
+            --cov=pythermacell \
+            --cov-report=term-missing \
+            --cov-report=xml \
+            --cov-report=html \
+            --junitxml=pytest.xml
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        if: inputs.python-version == '3.13'
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          file: ./coverage.xml
+          flags: unittests
+          name: python-${{ inputs.python-version }}
+          fail_ci_if_error: false
+
+      - name: Upload coverage HTML
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-html-${{ inputs.python-version }}
+          path: htmlcov/
+          retention-days: 30
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pytest-results-${{ inputs.python-version }}
+          path: pytest.xml
+          retention-days: 30
+
+  integration-test:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    if: inputs.run-integration
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python
+        run: uv python install ${{ inputs.python-version }}
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Mask secrets in logs
+        run: |
+          echo "::add-mask::${{ secrets.THERMACELL_USERNAME }}"
+          echo "::add-mask::${{ secrets.THERMACELL_PASSWORD }}"
+
+      - name: Run integration tests
+        env:
+          THERMACELL_USERNAME: ${{ secrets.THERMACELL_USERNAME }}
+          THERMACELL_PASSWORD: ${{ secrets.THERMACELL_PASSWORD }}
+          THERMACELL_API_BASE_URL: ${{ secrets.THERMACELL_API_BASE_URL }}
+          THERMACELL_TEST_NODE_ID: ${{ secrets.THERMACELL_TEST_NODE_ID }}
+          PYTHONUNBUFFERED: "1"
+        run: |
+          # Disable pytest output capture to ensure secrets aren't leaked
+          uv run pytest tests/integration/ \
+            -v \
+            --tb=short \
+            --capture=no \
+            --log-cli-level=WARNING \
+            2>&1 | sed 's/${{ secrets.THERMACELL_USERNAME }}/***MASKED***/g' | sed 's/${{ secrets.THERMACELL_PASSWORD }}/***MASKED***/g'
+
+      - name: Upload integration test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: integration-test-results
+          path: |
+            tests/integration/*.log
+          retention-days: 7
+          if-no-files-found: ignore
