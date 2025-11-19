@@ -34,8 +34,7 @@ jobs:
     with:
       python-version: ${{ matrix.python-version }}
       run-integration: false
-    secrets:
-      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+    secrets: inherit
 
   # Integration tests with manual approval
   integration-tests:
@@ -46,11 +45,7 @@ jobs:
       python-version: "3.13"
       run-integration: true
     environment: integration-tests
-    secrets:
-      THERMACELL_USERNAME: ${{ secrets.THERMACELL_USERNAME }}
-      THERMACELL_PASSWORD: ${{ secrets.THERMACELL_PASSWORD }}
-      THERMACELL_API_BASE_URL: ${{ secrets.THERMACELL_API_BASE_URL }}
-      THERMACELL_TEST_NODE_ID: ${{ secrets.THERMACELL_TEST_NODE_ID }}
+    secrets: inherit
 
   # Build package once, use for both TestPyPI and PyPI
   build:
