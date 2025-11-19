@@ -102,7 +102,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: [lint, test]
-    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+    # Skip integration tests for Dependabot PRs (they don't have access to secrets)
+    if: (github.event_name == 'pull_request' && github.actor != 'dependabot[bot]') || github.ref == 'refs/heads/main'
     environment: integration-tests
     steps:
       - uses: actions/checkout@v5
