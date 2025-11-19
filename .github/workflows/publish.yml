@@ -99,16 +99,13 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-extras
 
-      - name: Mask secrets in logs
-        run: |
-          echo "::add-mask::${{ secrets.THERMACELL_USERNAME }}"
-          echo "::add-mask::${{ secrets.THERMACELL_PASSWORD }}"
-
       - name: Run integration tests
         env:
           THERMACELL_USERNAME: ${{ secrets.THERMACELL_USERNAME }}
           THERMACELL_PASSWORD: ${{ secrets.THERMACELL_PASSWORD }}
           THERMACELL_API_BASE_URL: ${{ secrets.THERMACELL_API_BASE_URL }}
+          # Note: Secrets are automatically masked by GitHub Actions
+          # Do not add explicit masking as it may interfere with device IDs
           PYTHONUNBUFFERED: "1"
         run: |
           uv run pytest tests/integration/ \
