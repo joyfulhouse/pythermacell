@@ -24,22 +24,18 @@ permissions:
 
 jobs:
   # Run full test suite before publishing
-  test-all-versions:
-    name: Test Suite
-    strategy:
-      fail-fast: true  # Stop if any version fails
-      matrix:
-        python-version: ["3.13"]
+  test:
+    name: Test Suite (Python 3.13)
     uses: ./.github/workflows/test.yml
     with:
-      python-version: ${{ matrix.python-version }}
+      python-version: "3.13"
       run-integration: false
     secrets: inherit
 
   # Integration tests with manual approval
   integration-tests:
     name: Integration Tests
-    needs: test-all-versions
+    needs: test
     uses: ./.github/workflows/test.yml
     with:
       python-version: "3.13"
@@ -52,7 +48,7 @@ jobs:
     name: Build Package
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [test-all-versions, integration-tests]
+    needs: [test, integration-tests]
     steps:
       - uses: actions/checkout@v4
 

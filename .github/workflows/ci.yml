@@ -17,16 +17,12 @@ permissions:
   pull-requests: write  # For PR comments
 
 jobs:
-  # Run lint and unit tests in parallel on multiple Python versions
-  test-matrix:
-    name: Test Suite
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.13"]
+  # Run tests on Python 3.13
+  test:
+    name: Test Suite (Python 3.13)
     uses: ./.github/workflows/test.yml
     with:
-      python-version: ${{ matrix.python-version }}
+      python-version: "3.13"
       run-integration: false
     secrets: inherit
 
@@ -34,7 +30,7 @@ jobs:
   # Only on PRs and main branch, requires manual approval
   integration-tests:
     name: Integration Tests
-    needs: test-matrix
+    needs: test
     if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
     uses: ./.github/workflows/test.yml
     with:
@@ -48,16 +44,16 @@ jobs:
     name: CI Success
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [test-matrix, integration-tests]
+    needs: [test, integration-tests]
     if: always()
     steps:
       - name: Check all jobs
         run: |
-          echo "Test matrix result: ${{ needs.test-matrix.result }}"
+          echo "Test result: ${{ needs.test.result }}"
           echo "Integration tests result: ${{ needs.integration-tests.result }}"
 
-          if [[ "${{ needs.test-matrix.result }}" != "success" ]]; then
-            echo "❌ Test matrix failed"
+          if [[ "${{ needs.test.result }}" != "success" ]]; then
+            echo "❌ Tests failed"
             exit 1
           fi
 
