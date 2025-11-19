@@ -140,7 +140,7 @@ async def test_device_id(
         if devices:
             # Find first online device
             for device in devices:
-                if device.connectivity_status == "online":
+                if device.is_online:
                     _test_device_cache[cache_key] = device.node_id
                     return device.node_id
 
