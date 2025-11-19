@@ -14,43 +14,146 @@ concurrency:
 
 permissions:
   contents: read
-  pull-requests: write  # For PR comments
+  pull-requests: write
 
 jobs:
-  # Run tests on Python 3.13
-  test:
-    name: Test Suite (Python 3.13)
-    uses: ./.github/workflows/test.yml
-    with:
-      python-version: "3.13"
-      run-integration: false
-    secrets: inherit
+  lint:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
 
-  # Integration tests run after unit tests pass
-  # Only on PRs and main branch, requires manual approval
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python
+        run: uv python install 3.13
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Run ruff linting
+        run: uv run ruff check src/ tests/
+
+      - name: Run ruff formatting check
+        run: uv run ruff format --check src/ tests/
+
+      - name: Run mypy type checking
+        run: uv run mypy src/pythermacell/
+
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python
+        run: uv python install 3.13
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Run unit tests
+        run: |
+          uv run pytest tests/ -m "not integration and not manual" \
+            --cov=pythermacell \
+            --cov-report=term-missing \
+            --cov-report=xml \
+            --cov-report=html \
+            --junitxml=pytest.xml
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          file: ./coverage.xml
+          flags: unittests
+          fail_ci_if_error: false
+
+      - name: Upload coverage HTML
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-html-py3.13
+          path: htmlcov/
+          retention-days: 30
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pytest-results-py3.13
+          path: pytest.xml
+          retention-days: 30
+
   integration-tests:
     name: Integration Tests
-    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [lint, test]
     if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
-    uses: ./.github/workflows/test.yml
-    with:
-      python-version: "3.13"
-      run-integration: true
     environment: integration-tests
-    secrets: inherit
+    steps:
+      - uses: actions/checkout@v4
 
-  # All checks passed - single required status check for branch protection
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python
+        run: uv python install 3.13
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Mask secrets in logs
+        run: |
+          echo "::add-mask::${{ secrets.THERMACELL_USERNAME }}"
+          echo "::add-mask::${{ secrets.THERMACELL_PASSWORD }}"
+
+      - name: Run integration tests
+        env:
+          THERMACELL_USERNAME: ${{ secrets.THERMACELL_USERNAME }}
+          THERMACELL_PASSWORD: ${{ secrets.THERMACELL_PASSWORD }}
+          THERMACELL_API_BASE_URL: ${{ secrets.THERMACELL_API_BASE_URL }}
+          THERMACELL_TEST_NODE_ID: ${{ secrets.THERMACELL_TEST_NODE_ID }}
+          PYTHONUNBUFFERED: "1"
+        run: |
+          uv run pytest tests/integration/ \
+            -v \
+            --tb=short \
+            --log-cli-level=WARNING
+
   ci-success:
     name: CI Success
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [test, integration-tests]
+    needs: [lint, test, integration-tests]
     if: always()
     steps:
       - name: Check all jobs
         run: |
+          echo "Lint result: ${{ needs.lint.result }}"
           echo "Test result: ${{ needs.test.result }}"
           echo "Integration tests result: ${{ needs.integration-tests.result }}"
+
+          if [[ "${{ needs.lint.result }}" != "success" ]]; then
+            echo "❌ Lint failed"
+            exit 1
+          fi
 
           if [[ "${{ needs.test.result }}" != "success" ]]; then
             echo "❌ Tests failed"

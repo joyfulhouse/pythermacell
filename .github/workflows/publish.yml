@@ -23,32 +23,105 @@ permissions:
   id-token: write  # Required for OIDC PyPI publishing
 
 jobs:
-  # Run full test suite before publishing
-  test:
-    name: Test Suite (Python 3.13)
-    uses: ./.github/workflows/test.yml
-    with:
-      python-version: "3.13"
-      run-integration: false
-    secrets: inherit
+  lint:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
 
-  # Integration tests with manual approval
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python
+        run: uv python install 3.13
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Run ruff linting
+        run: uv run ruff check src/ tests/
+
+      - name: Run ruff formatting check
+        run: uv run ruff format --check src/ tests/
+
+      - name: Run mypy type checking
+        run: uv run mypy src/pythermacell/
+
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python
+        run: uv python install 3.13
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Run unit tests
+        run: |
+          uv run pytest tests/ -m "not integration and not manual" \
+            --cov=pythermacell \
+            --cov-report=term-missing \
+            --cov-report=xml \
+            --junitxml=pytest.xml
+
   integration-tests:
     name: Integration Tests
-    needs: test
-    uses: ./.github/workflows/test.yml
-    with:
-      python-version: "3.13"
-      run-integration: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [lint, test]
     environment: integration-tests
-    secrets: inherit
+    steps:
+      - uses: actions/checkout@v4
 
-  # Build package once, use for both TestPyPI and PyPI
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python
+        run: uv python install 3.13
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Mask secrets in logs
+        run: |
+          echo "::add-mask::${{ secrets.THERMACELL_USERNAME }}"
+          echo "::add-mask::${{ secrets.THERMACELL_PASSWORD }}"
+
+      - name: Run integration tests
+        env:
+          THERMACELL_USERNAME: ${{ secrets.THERMACELL_USERNAME }}
+          THERMACELL_PASSWORD: ${{ secrets.THERMACELL_PASSWORD }}
+          THERMACELL_API_BASE_URL: ${{ secrets.THERMACELL_API_BASE_URL }}
+          THERMACELL_TEST_NODE_ID: ${{ secrets.THERMACELL_TEST_NODE_ID }}
+          PYTHONUNBUFFERED: "1"
+        run: |
+          uv run pytest tests/integration/ \
+            -v \
+            --tb=short \
+            --log-cli-level=WARNING
+
   build:
     name: Build Package
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [test, integration-tests]
+    needs: [lint, test, integration-tests]
     steps:
       - uses: actions/checkout@v4
 
@@ -77,7 +150,6 @@ jobs:
           path: dist/
           retention-days: 7
 
-  # Publish to TestPyPI (automatic)
   publish-testpypi:
     name: Publish to TestPyPI
     runs-on: ubuntu-latest
@@ -109,7 +181,6 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Test install: \`pip install --index-url https://test.pypi.org/simple/ pythermacell\`" >> $GITHUB_STEP_SUMMARY
 
-  # Publish to PyPI (manual approval required)
   publish-pypi:
     name: Publish to PyPI
     runs-on: ubuntu-latest
