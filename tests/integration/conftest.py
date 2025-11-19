@@ -140,20 +140,22 @@ async def test_device_id(
         if devices:
             # Find first online device
             for device in devices:
-                if device.is_online:
+                if device.is_online and device.node_id:  # Ensure node_id is not empty
                     _test_device_cache[cache_key] = device.node_id
                     return device.node_id
 
-            # No online devices, use first device anyway
-            _test_device_cache[cache_key] = devices[0].node_id
-            return devices[0].node_id
+            # No online devices, use first device with valid node_id
+            for device in devices:
+                if device.node_id:  # Skip devices with empty node_id
+                    _test_device_cache[cache_key] = device.node_id
+                    return device.node_id
     except Exception:
         # Discovery failed, no device available - fall through to return None
         # We catch all exceptions here because we want tests to skip gracefully
         # if device discovery fails for any reason (auth, network, etc.)
         ...
 
-    # No devices found
+    # No devices found with valid node_id
     _test_device_cache[cache_key] = None
     return None
 
