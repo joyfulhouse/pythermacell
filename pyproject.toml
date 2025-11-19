@@ -46,6 +46,7 @@ Issues = "https://github.com/joyfulhouse/pythermacell/issues"
 
 [tool.hatchling.build.targets.wheel]
 packages = ["src/pythermacell"]
+include = ["src/pythermacell/py.typed"]
 
 [tool.pytest.ini_options]
 minversion = "9.0"

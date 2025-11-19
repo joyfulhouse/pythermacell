@@ -5,6 +5,17 @@ from __future__ import annotations
 from typing import Any
 
 
+__all__ = [
+    "AuthenticationError",
+    "DeviceError",
+    "InvalidParameterError",
+    "RateLimitError",
+    "ThermacellConnectionError",
+    "ThermacellError",
+    "ThermacellTimeoutError",
+]
+
+
 class ThermacellError(Exception):
     """Base exception for all Thermacell errors."""
 
