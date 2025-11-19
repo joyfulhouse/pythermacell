@@ -14,7 +14,9 @@ updates:
       prefix: "chore(deps)"
       include: "scope"
 
-  # Python dependencies
+  # Python dependencies (using pip ecosystem for pyproject.toml)
+  # Note: Dependabot doesn't support uv yet, but "pip" ecosystem
+  # can read pyproject.toml and suggest updates. We use uv in CI.
   - package-ecosystem: "pip"
     directory: "/"
     schedule:
@@ -39,3 +41,6 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    # Ensure compatibility with uv
+    reviewers:
+      - "bryanli"
