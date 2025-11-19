@@ -48,21 +48,27 @@ jobs:
       THERMACELL_API_BASE_URL: ${{ secrets.THERMACELL_API_BASE_URL }}
       THERMACELL_TEST_NODE_ID: ${{ secrets.THERMACELL_TEST_NODE_ID }}
 
-  # All checks passed
+  # All checks passed - single required status check for branch protection
   ci-success:
     name: CI Success
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     needs: [test-matrix, integration-tests]
     if: always()
     steps:
       - name: Check all jobs
         run: |
+          echo "Test matrix result: ${{ needs.test-matrix.result }}"
+          echo "Integration tests result: ${{ needs.integration-tests.result }}"
+
           if [[ "${{ needs.test-matrix.result }}" != "success" ]]; then
-            echo "Test matrix failed"
+            echo "❌ Test matrix failed"
             exit 1
           fi
+
           if [[ "${{ needs.integration-tests.result }}" != "success" && "${{ needs.integration-tests.result }}" != "skipped" ]]; then
-            echo "Integration tests failed"
+            echo "❌ Integration tests failed"
             exit 1
           fi
-          echo "All CI checks passed!"
+
+          echo "✅ All CI checks passed!"

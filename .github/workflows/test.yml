@@ -24,10 +24,15 @@ on:
       CODECOV_TOKEN:
         required: false
 
+# Explicit permissions for security best practices
+permissions:
+  contents: read
+
 jobs:
   lint:
-    name: Lint & Type Check
+    name: Lint & Type Check (Python ${{ inputs.python-version }})
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -55,6 +60,7 @@ jobs:
   test:
     name: Unit Tests (Python ${{ inputs.python-version }})
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -93,7 +99,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: coverage-html-${{ inputs.python-version }}
+          name: coverage-html-py${{ inputs.python-version }}
           path: htmlcov/
           retention-days: 30
 
@@ -101,13 +107,14 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: pytest-results-${{ inputs.python-version }}
+          name: pytest-results-py${{ inputs.python-version }}
           path: pytest.xml
           retention-days: 30
 
   integration-test:
-    name: Integration Tests
+    name: Integration Tests (Python ${{ inputs.python-version }})
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     if: inputs.run-integration
     steps:
       - uses: actions/checkout@v4
@@ -137,19 +144,16 @@ jobs:
           THERMACELL_TEST_NODE_ID: ${{ secrets.THERMACELL_TEST_NODE_ID }}
           PYTHONUNBUFFERED: "1"
         run: |
-          # Disable pytest output capture to ensure secrets aren't leaked
           uv run pytest tests/integration/ \
             -v \
             --tb=short \
-            --capture=no \
-            --log-cli-level=WARNING \
-            2>&1 | sed 's/${{ secrets.THERMACELL_USERNAME }}/***MASKED***/g' | sed 's/${{ secrets.THERMACELL_PASSWORD }}/***MASKED***/g'
+            --log-cli-level=WARNING
 
       - name: Upload integration test results
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: integration-test-results
+          name: integration-test-results-py${{ inputs.python-version }}
           path: |
             tests/integration/*.log
           retention-days: 7
