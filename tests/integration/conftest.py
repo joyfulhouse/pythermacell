@@ -148,8 +148,10 @@ async def test_device_id(
             _test_device_cache[cache_key] = devices[0].node_id
             return devices[0].node_id
     except Exception:
-        # Discovery failed, no device available
-        pass
+        # Discovery failed, no device available - fall through to return None
+        # We catch all exceptions here because we want tests to skip gracefully
+        # if device discovery fails for any reason (auth, network, etc.)
+        ...
 
     # No devices found
     _test_device_cache[cache_key] = None
