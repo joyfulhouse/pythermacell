@@ -109,7 +109,6 @@ jobs:
           THERMACELL_USERNAME: ${{ secrets.THERMACELL_USERNAME }}
           THERMACELL_PASSWORD: ${{ secrets.THERMACELL_PASSWORD }}
           THERMACELL_API_BASE_URL: ${{ secrets.THERMACELL_API_BASE_URL }}
-          THERMACELL_TEST_NODE_ID: ${{ secrets.THERMACELL_TEST_NODE_ID }}
           PYTHONUNBUFFERED: "1"
         run: |
           uv run pytest tests/integration/ \

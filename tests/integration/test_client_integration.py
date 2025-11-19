@@ -110,16 +110,16 @@ class TestDeviceDiscovery:
             assert device.firmware_version is not None, "Device should have firmware version"
             assert device.serial_number is not None, "Device should have serial number"
 
-    async def test_get_device_by_id(self, client: ThermacellClient, test_node_id: str | None) -> None:
+    async def test_get_device_by_id(self, client: ThermacellClient, test_device_id: str | None) -> None:
         """Test getting specific device by node ID."""
         # Get a device ID to test with
-        if test_node_id is None:
+        if test_device_id is None:
             devices = await client.get_devices()
             if len(devices) == 0:
                 pytest.skip("No devices available for testing")
             node_id = devices[0].node_id
         else:
-            node_id = test_node_id
+            node_id = test_device_id
 
         # Get device by ID
         device = await client.get_device(node_id)
@@ -142,16 +142,16 @@ class TestDeviceDiscovery:
 class TestDeviceState:
     """Integration tests for device state retrieval."""
 
-    async def test_get_device_state(self, client: ThermacellClient, test_node_id: str | None) -> None:
+    async def test_get_device_state(self, client: ThermacellClient, test_device_id: str | None) -> None:
         """Test retrieving complete device state."""
         # Get a device ID to test with
-        if test_node_id is None:
+        if test_device_id is None:
             devices = await client.get_devices()
             if len(devices) == 0:
                 pytest.skip("No devices available for testing")
             node_id = devices[0].node_id
         else:
-            node_id = test_node_id
+            node_id = test_device_id
 
         # Get device state
         state = await client.get_device_state(node_id)
@@ -189,16 +189,16 @@ class TestDeviceState:
         assert "status" in state.raw_data, "Raw data should include status"
         assert "config" in state.raw_data, "Raw data should include config"
 
-    async def test_device_state_params(self, client: ThermacellClient, test_node_id: str | None) -> None:  # noqa: PLR0912
+    async def test_device_state_params(self, client: ThermacellClient, test_device_id: str | None) -> None:  # noqa: PLR0912
         """Test device state contains all expected parameters."""
         # Get a device ID to test with
-        if test_node_id is None:
+        if test_device_id is None:
             devices = await client.get_devices()
             if len(devices) == 0:
                 pytest.skip("No devices available for testing")
             node_id = devices[0].node_id
         else:
-            node_id = test_node_id
+            node_id = test_device_id
 
         # Get device state
         state = await client.get_device_state(node_id)
@@ -246,16 +246,16 @@ class TestDeviceState:
 class TestDeviceProperties:
     """Integration tests for device property accessors."""
 
-    async def test_device_properties(self, client: ThermacellClient, test_node_id: str | None) -> None:
+    async def test_device_properties(self, client: ThermacellClient, test_device_id: str | None) -> None:
         """Test device property accessors return correct values."""
         # Get a device to test with
-        if test_node_id is None:
+        if test_device_id is None:
             devices = await client.get_devices()
             if len(devices) == 0:
                 pytest.skip("No devices available for testing")
             device = devices[0]
         else:
-            device = await client.get_device(test_node_id)
+            device = await client.get_device(test_device_id)
             assert device is not None, "Test device should exist"
 
         # Test basic properties

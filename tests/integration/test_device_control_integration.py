@@ -52,12 +52,12 @@ async def verify_state(
 
 
 @pytest.fixture
-async def test_device(shared_integration_client: ThermacellClient, test_node_id: str | None) -> ThermacellDevice:
+async def test_device(shared_integration_client: ThermacellClient, test_device_id: str | None) -> ThermacellDevice:
     """Get a test device to use for control tests.
 
     Uses the shared session-scoped client to avoid re-authentication.
     """
-    if test_node_id is None:
+    if test_device_id is None:
         devices = await shared_integration_client.get_devices()
         if len(devices) == 0:
             pytest.skip("No devices available for testing")
@@ -72,9 +72,9 @@ async def test_device(shared_integration_client: ThermacellClient, test_node_id:
         if device is None:
             pytest.skip("No online devices available for testing")
     else:
-        device = await shared_integration_client.get_device(test_node_id)
+        device = await shared_integration_client.get_device(test_device_id)
         if device is None:
-            pytest.skip(f"Test device {test_node_id} not found")
+            pytest.skip(f"Test device {test_device_id} not found")
 
     return device
 

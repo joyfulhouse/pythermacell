@@ -56,12 +56,18 @@ def test_node_id() -> str | None:
 
     Returns:
         Node ID for testing, or None to use first discovered device.
+
+    Note: This is now optional. If not provided, tests will automatically
+    use the first available online device from the account.
     """
     return os.getenv("THERMACELL_TEST_NODE_ID")
 
 
 # Shared client cache (module-scoped to avoid pytest-asyncio scope issues)
 _client_cache: dict[str, ThermacellClient] = {}
+
+# Cache for discovered test device (to avoid re-discovering on each test)
+_test_device_cache: dict[str, str | None] = {}
 
 
 @pytest.fixture
@@ -103,6 +109,51 @@ async def shared_integration_client(integration_config: dict[str, str]) -> Async
         await client._auth_handler.ensure_authenticated()
         yield client
     # Session closes here, but client and auth token are cached
+
+
+@pytest.fixture
+async def test_device_id(
+    shared_integration_client: ThermacellClient,
+    test_node_id: str | None,
+    integration_config: dict[str, str],
+) -> str | None:
+    """Get a test device ID - either from environment or auto-discover first online device.
+
+    This fixture automatically finds the first available online device if
+    THERMACELL_TEST_NODE_ID is not configured.
+
+    Returns:
+        Device node ID for testing, or None if no devices available.
+    """
+    # If explicitly configured, use that
+    if test_node_id:
+        return test_node_id
+
+    # Check cache
+    cache_key = f"{integration_config['username']}@{integration_config['base_url']}"
+    if cache_key in _test_device_cache:
+        return _test_device_cache[cache_key]
+
+    # Auto-discover first online device
+    try:
+        devices = await shared_integration_client.get_devices()
+        if devices:
+            # Find first online device
+            for device in devices:
+                if device.connectivity_status == "online":
+                    _test_device_cache[cache_key] = device.node_id
+                    return device.node_id
+
+            # No online devices, use first device anyway
+            _test_device_cache[cache_key] = devices[0].node_id
+            return devices[0].node_id
+    except Exception:
+        # Discovery failed, no device available
+        pass
+
+    # No devices found
+    _test_device_cache[cache_key] = None
+    return None
 
 
 def pytest_configure(config: pytest.Config) -> None:
