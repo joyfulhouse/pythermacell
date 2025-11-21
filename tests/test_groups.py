@@ -484,9 +484,7 @@ class TestClientGroupMethods:
                 # Group has 2 devices out of 10 total
                 return web.json_response({"nodes": ["node-1", "node-2"], "total": 2})
             # All devices (should NOT be called)
-            return web.json_response(
-                {"nodes": [f"node-{i}" for i in range(1, 11)], "total": 10}
-            )
+            return web.json_response({"nodes": [f"node-{i}" for i in range(1, 11)], "total": 10})
 
         async def count_params(request: web.Request) -> web.Response:
             call_counts["params"] += 1
