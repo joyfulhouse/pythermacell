@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pythermacell"
-version = "0.1.0"
+version = "0.2.0"
 description = "Python client library for Thermacell IoT devices using ESP RainMaker API"
 readme = "README.md"
 requires-python = ">=3.13"

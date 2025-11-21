@@ -6,7 +6,8 @@ Complete documentation for the pythermacell library - a Python client for Therma
 
 ### 📖 User Documentation
 - [Main README](../README.md) - Project overview and quick start
-- [CHANGELOG](CHANGELOG.md) - Version history and changes
+- [CHANGELOG](../CHANGELOG.md) - Version history and changes
+- [Migration Guide v0.2.0](MIGRATION_v0.2.0.md) - Upgrading from v0.1.0 to v0.2.0
 - [Examples](../examples/README.md) - Code examples and usage patterns
 
 ### 🏗️ Architecture
@@ -40,7 +41,7 @@ Complete documentation for the pythermacell library - a Python client for Therma
 ```
 docs/
 ├── README.md                    # This file - documentation index
-├── CHANGELOG.md                 # Version history
+├── MIGRATION_v0.2.0.md          # v0.1.0 → v0.2.0 migration guide
 │
 ├── api/                         # API endpoint documentation
 │   ├── README.md                # API overview
@@ -67,8 +68,9 @@ docs/
 ```
 
 ### Root-Level Files
-Only these markdown files should be in the project root:
+Only these files should be in the project root:
 - `README.md` - Main project README
+- `CHANGELOG.md` - Version history (standard location)
 - `CLAUDE.md` - Claude Code instructions
 - `LICENSE` - Project license
 

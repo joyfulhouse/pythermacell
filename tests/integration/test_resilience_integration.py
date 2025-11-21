@@ -272,8 +272,12 @@ class TestCombinedResiliencePatterns:
                 device = devices[0]
 
                 # Device operations should work with resilience patterns
-                state = await client.get_device_state(device.node_id)
-                assert state is not None, "Get state should succeed"
+                # Verify device has state
+                assert device._state is not None, "Device should have state"
+
+                # Test refresh works with resilience
+                success = await device.refresh()
+                assert success is True, "Refresh should succeed"
 
                 # Circuit should remain closed
                 assert breaker.state == CircuitState.CLOSED, "Circuit should be closed"
