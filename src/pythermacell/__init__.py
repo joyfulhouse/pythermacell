@@ -74,6 +74,13 @@ from pythermacell.resilience import (
     RateLimiter,
     retry_with_backoff,
 )
+from pythermacell.serializers import (
+    deserialize_device_info,
+    deserialize_device_params,
+    deserialize_device_state,
+    deserialize_device_status,
+    serialize_param_update,
+)
 
 
 __version__ = "0.2.0"
@@ -103,5 +110,10 @@ __all__ = [
     "ThermacellError",
     "ThermacellTimeoutError",
     "__version__",
+    "deserialize_device_info",
+    "deserialize_device_params",
+    "deserialize_device_state",
+    "deserialize_device_status",
     "retry_with_backoff",
+    "serialize_param_update",
 ]

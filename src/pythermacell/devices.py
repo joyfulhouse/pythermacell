@@ -521,28 +521,15 @@ class ThermacellDevice:
             _LOGGER.warning("Failed to refresh config for device %s: HTTP %d", self.node_id, config_status)
             return False
 
-        # Import parsing functions from client
-        # NOTE: This is a temporary coupling - ideally these would be in a shared module
-        from pythermacell.client import ThermacellClient  # noqa: PLC0415 - Lazy import to avoid circular dependency
-        from pythermacell.models import DeviceState  # noqa: PLC0415 - Lazy import to avoid circular dependency
-
-        # Create a temporary client instance for parsing (not ideal, but works)
-        # In a future refactor, move parsing logic to a separate module
-        temp_client = ThermacellClient.__new__(ThermacellClient)
-        device_params = temp_client._parse_device_params(params_data)  # noqa: SLF001
-        device_status = temp_client._parse_device_status(self.node_id, status_data)  # noqa: SLF001
-        device_info = temp_client._parse_device_info(self.node_id, config_data)  # noqa: SLF001
+        # Parse responses using serializers module
+        from pythermacell.serializers import deserialize_device_state  # noqa: PLC0415, I001 - Lazy import to avoid circular dependency
 
         # Update state
-        new_state = DeviceState(
-            info=device_info,
-            status=device_status,
-            params=device_params,
-            raw_data={
-                "params": params_data,
-                "status": status_data,
-                "config": config_data,
-            },
+        new_state = deserialize_device_state(
+            node_id=self.node_id,
+            params_data=params_data,
+            status_data=status_data,
+            config_data=config_data,
         )
 
         await self._update_state(new_state)

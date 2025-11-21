@@ -137,6 +137,68 @@ class DeviceState:
         """Check if device has an error."""
         return (self.params.error or 0) > 0
 
+    # Convenience properties for commonly accessed device info
+    @property
+    def model(self) -> str:
+        """Get device model."""
+        return self.info.model
+
+    @property
+    def firmware_version(self) -> str:
+        """Get firmware version."""
+        return self.info.firmware_version
+
+    @property
+    def serial_number(self) -> str:
+        """Get serial number."""
+        return self.info.serial_number
+
+    # Convenience properties for commonly accessed device params
+    @property
+    def power(self) -> bool | None:
+        """Get device power state."""
+        return self.params.power
+
+    @property
+    def led_power(self) -> bool | None:
+        """Get LED power state."""
+        return self.params.led_power
+
+    @property
+    def led_brightness(self) -> int | None:
+        """Get LED brightness (0-100)."""
+        return self.params.led_brightness
+
+    @property
+    def led_hue(self) -> int | None:
+        """Get LED hue (0-360)."""
+        return self.params.led_hue
+
+    @property
+    def led_saturation(self) -> int | None:
+        """Get LED saturation (0-100)."""
+        return self.params.led_saturation
+
+    @property
+    def refill_life(self) -> float | None:
+        """Get refill life percentage."""
+        return self.params.refill_life
+
+    @property
+    def runtime_minutes(self) -> int | None:
+        """Get system runtime in minutes."""
+        return self.params.system_runtime
+
+    @property
+    def system_status(self) -> int | None:
+        """Get system status (1=Off, 2=Warming, 3=Protected)."""
+        return self.params.system_status
+
+    @property
+    def error_code(self) -> int | None:
+        """Get error code (0=no error)."""
+        return self.params.error
+
 
 @dataclass
 class Group:
