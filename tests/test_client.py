@@ -270,7 +270,6 @@ class TestClientGetDevice:
         mock_auth: AsyncMock,
     ) -> None:
         """Test getting cached device without refresh (0 API calls)."""
-        client = await aiohttp_client(app)
         call_counts = {"params": 0, "status": 0, "config": 0}
 
         # Create custom app to count API calls
@@ -328,7 +327,6 @@ class TestClientGetDevice:
         mock_auth: AsyncMock,
     ) -> None:
         """Test force_refresh parameter refreshes cached device."""
-        client = await aiohttp_client(app)
         call_counts = {"params": 0, "status": 0, "config": 0}
 
         # Create custom app to count API calls
@@ -386,7 +384,6 @@ class TestClientGetDevice:
         mock_auth: AsyncMock,
     ) -> None:
         """Test max_age_seconds doesn't refresh if state is fresh."""
-        client = await aiohttp_client(app)
         call_counts = {"params": 0, "status": 0, "config": 0}
 
         # Create custom app to count API calls
@@ -444,7 +441,6 @@ class TestClientGetDevice:
         """Test max_age_seconds refreshes if state is stale."""
         import asyncio
 
-        client = await aiohttp_client(app)
         call_counts = {"params": 0, "status": 0, "config": 0}
 
         # Create custom app to count API calls
