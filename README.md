@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 [![Type checked: mypy](https://img.shields.io/badge/type%20checked-mypy-blue.svg)](http://mypy-lang.org/)
-[![Test Coverage](https://img.shields.io/badge/coverage-89%25-brightgreen.svg)](https://github.com/joyfulhouse/pythermacell)
+[![Test Coverage](https://img.shields.io/badge/coverage-87%25-brightgreen.svg)](https://github.com/joyfulhouse/pythermacell)
 
 A modern, fully-typed Python client library for **Thermacell IoT devices** using the ESP RainMaker API platform.
 
@@ -20,7 +20,7 @@ A modern, fully-typed Python client library for **Thermacell IoT devices** using
 - Session injection support for efficient resource management
 - Built-in resilience patterns (circuit breaker, exponential backoff, rate limiting)
 - Comprehensive error handling with custom exception types
-- 90%+ test coverage with unit and integration tests
+- 86%+ test coverage with unit and integration tests
 
 🎮 **Device Control**
 - Power control (on/off)
@@ -33,6 +33,13 @@ A modern, fully-typed Python client library for **Thermacell IoT devices** using
 - Excellent documentation
 - Follows Home Assistant Platinum tier quality standards
 - Separation of concerns with clear architecture
+
+🚀 **v0.2.0 New Features**
+- **Three-Layer Architecture**: Clean separation (API → Client → Device)
+- **Optimistic Updates**: 24x faster perceived responsiveness (~0.01s vs ~2.5s)
+- **State Caching**: Device properties return cached values instantly
+- **Auto-Refresh**: Optional background polling to keep state current
+- **Change Listeners**: Register callbacks for reactive state updates
 
 ---
 
@@ -225,6 +232,62 @@ print(f"LED Hue: {device.led_hue}")
 print(f"LED Saturation: {device.led_saturation}")
 ```
 
+#### Optimistic Updates
+
+Device control methods use optimistic updates for instant UI responsiveness:
+
+```python
+# Old behavior: Wait ~2.5s for API response before UI updates
+# New behavior: UI updates instantly (~0.01s), API call happens in background
+
+await device.turn_on()  # UI updates immediately
+# If API call fails, state automatically reverts
+```
+
+**How it works:**
+1. Local state updates immediately (instant UI feedback)
+2. API call executes in background (~2.5s)
+3. On failure, state automatically reverts and listeners are notified
+
+#### Auto-Refresh
+
+Keep device state current with automatic background polling:
+
+```python
+# Start auto-refresh (polls every 60 seconds)
+await device.start_auto_refresh(interval=60)
+
+# Device state is automatically kept up-to-date
+# Change listeners are notified on each refresh
+
+# Stop auto-refresh
+await device.stop_auto_refresh()
+```
+
+#### State Change Listeners
+
+Register callbacks to react to state changes:
+
+```python
+def on_state_change(device):
+    print(f"{device.name} changed!")
+    print(f"  Power: {device.is_powered_on}")
+    print(f"  Refill: {device.refill_life}%")
+    print(f"  Last refresh: {device.last_refresh}")
+
+# Register listener
+device.add_listener(on_state_change)
+
+# Listener called on:
+# - Optimistic updates (immediate)
+# - Auto-refresh (every interval)
+# - Manual refresh (when you call device.refresh())
+# - Failed updates (reversion)
+
+# Remove listener
+device.remove_listener(on_state_change)
+```
+
 #### Maintenance Operations
 
 ```python
@@ -390,10 +453,10 @@ ThermacellClient(
 ```
 
 **Methods:**
-- `async get_devices() -> list[ThermacellDevice]` - Get all devices
-- `async get_device(node_id: str) -> ThermacellDevice | None` - Get specific device
-- `async get_device_state(node_id: str) -> DeviceState | None` - Get device state
-- `async update_device_params(node_id: str, params: dict) -> bool` - Update device parameters
+- `async get_devices() -> list[ThermacellDevice]` - Get all devices (with state caching)
+- `async get_device(node_id: str) -> ThermacellDevice | None` - Get specific device (cached)
+- `async refresh_all() -> None` - Refresh state for all cached devices
+- `api: ThermacellAPI` - Access low-level API for advanced use cases
 
 ### ThermacellDevice
 
@@ -416,16 +479,21 @@ Represents a Thermacell device with control and monitoring capabilities.
 - `led_brightness: int | None` - LED brightness (0-100)
 - `led_hue: int | None` - LED hue (0-360)
 - `led_saturation: int | None` - LED saturation (0-100)
+- `last_refresh: datetime` - Timestamp of last state refresh
 
 **Methods:**
-- `async turn_on() -> bool` - Turn device on
-- `async turn_off() -> bool` - Turn device off
-- `async set_power(power_on: bool) -> bool` - Set power state
-- `async set_led_power(power_on: bool) -> bool` - Set LED power
-- `async set_led_brightness(brightness: int) -> bool` - Set LED brightness (0-100)
-- `async set_led_color(hue: int, saturation: int, brightness: int) -> bool` - Set LED color
-- `async reset_refill() -> bool` - Reset refill life to 100%
+- `async turn_on() -> bool` - Turn device on (optimistic)
+- `async turn_off() -> bool` - Turn device off (optimistic)
+- `async set_power(power_on: bool) -> bool` - Set power state (optimistic)
+- `async set_led_power(power_on: bool) -> bool` - Set LED power (optimistic)
+- `async set_led_brightness(brightness: int) -> bool` - Set LED brightness (optimistic)
+- `async set_led_color(hue: int, brightness: int) -> bool` - Set LED color (optimistic)
+- `async reset_refill(refill_type: int = 1) -> bool` - Reset refill life (optimistic)
 - `async refresh() -> bool` - Refresh device state from API
+- `async start_auto_refresh(interval: int = 60) -> None` - Start background polling
+- `async stop_auto_refresh() -> None` - Stop background polling
+- `add_listener(callback: Callable) -> None` - Register state change callback
+- `remove_listener(callback: Callable) -> None` - Unregister callback
 
 ### AuthenticationHandler
 
@@ -453,6 +521,31 @@ AuthenticationHandler(
 - `is_authenticated() -> bool` - Check if authenticated
 - `needs_reauthentication() -> bool` - Check if reauthentication needed
 - `clear_authentication() -> None` - Clear stored tokens
+
+### ThermacellAPI
+
+Low-level API client for direct HTTP communication.
+
+```python
+ThermacellAPI(
+    *,
+    auth_handler: AuthenticationHandler,
+    session: ClientSession | None = None,
+    base_url: str = "https://api.iot.thermacell.com",
+    circuit_breaker: CircuitBreaker | None = None,
+    backoff: ExponentialBackoff | None = None,
+    rate_limiter: RateLimiter | None = None,
+)
+```
+
+**Methods:** (all return `tuple[int, dict | None]`)
+- `async get_nodes() -> tuple[int, dict | None]` - Get device list
+- `async get_node_params(node_id: str) -> tuple[int, dict | None]` - Get device parameters
+- `async get_node_status(node_id: str) -> tuple[int, dict | None]` - Get device status
+- `async get_node_config(node_id: str) -> tuple[int, dict | None]` - Get device config
+- `async update_node_params(node_id: str, params: dict) -> tuple[int, dict | None]` - Update parameters
+
+Access via client: `status, data = await client.api.get_node_params(node_id)`
 
 ### Exception Hierarchy
 
@@ -645,6 +738,55 @@ async def resilient_operation():
 asyncio.run(resilient_operation())
 ```
 
+### Example 6: Advanced Features (v0.2.0)
+
+```python
+import asyncio
+from pythermacell import ThermacellClient
+
+async def advanced_features():
+    """Showcase v0.2.0 features: optimistic updates, auto-refresh, listeners."""
+    async with ThermacellClient(
+        username="your@email.com",
+        password="your_password"
+    ) as client:
+        devices = await client.get_devices()
+        device = devices[0]
+
+        # Register state change listener
+        def on_change(d):
+            print(f"[{d.last_refresh}] {d.name}: power={d.is_powered_on}, refill={d.refill_life}%")
+
+        device.add_listener(on_change)
+
+        # Start auto-refresh (background polling every 30 seconds)
+        await device.start_auto_refresh(interval=30)
+
+        # Control device with optimistic updates (instant UI feedback)
+        print("Turning on... (instant UI update)")
+        await device.turn_on()  # Returns immediately after local state update
+
+        # State is immediately available (cached)
+        print(f"Device state: {device.is_powered_on}")  # True (instant)
+
+        # Set LED with optimistic update
+        print("Setting LED to green...")
+        await device.set_led_color(hue=120, brightness=100)  # Instant feedback
+
+        # Wait for auto-refresh to trigger
+        print("Waiting for auto-refresh...")
+        await asyncio.sleep(35)  # Listener will be called
+
+        # Direct API access for advanced use cases
+        status, raw_data = await client.api.get_node_params(device.node_id)
+        print(f"Raw API response (status {status}): {raw_data}")
+
+        # Cleanup (happens automatically on context exit)
+        await device.stop_auto_refresh()
+
+asyncio.run(advanced_features())
+```
+
 More examples available in the [`examples/`](examples/) directory.
 
 ---
@@ -672,9 +814,10 @@ pip install -e ".[dev]"
 pythermacell/
 ├── src/pythermacell/         # Main package
 │   ├── __init__.py           # Public API exports
-│   ├── client.py             # ThermacellClient implementation
+│   ├── api.py                # Low-level HTTP API layer (NEW in v0.2.0)
+│   ├── client.py             # Device manager/coordinator
 │   ├── auth.py               # Authentication handler
-│   ├── devices.py            # Device management
+│   ├── devices.py            # Stateful device objects
 │   ├── models.py             # Data models
 │   ├── exceptions.py         # Custom exceptions
 │   ├── resilience.py         # Resilience patterns
@@ -727,11 +870,12 @@ pytest -x
 
 ### Test Coverage
 
-Current test coverage: **90.13%**
+Current test coverage: **86.52%**
 
-- `auth.py`: 89.04%
-- `client.py`: 78.72%
-- `devices.py`: 94.59%
+- `api.py`: 77.31%
+- `auth.py`: 89.91%
+- `client.py`: 85.11%
+- `devices.py`: 76.87%
 - `resilience.py`: 94.79%
 - `exceptions.py`: 100%
 - `models.py`: 100%
@@ -867,7 +1011,17 @@ Use this library at your own risk. The authors are not responsible for any damag
 
 See [CHANGELOG.md](docs/CHANGELOG.md) for version history and changes.
 
-**Latest Version: 0.1.0**
+**Latest Version: 0.2.0**
+- Three-layer architecture (API → Client → Device)
+- Optimistic updates for 24x faster responsiveness
+- State caching for instant property access
+- Auto-refresh with configurable intervals
+- Change listeners for reactive updates
+- Direct API access for advanced use cases
+- 86.52% test coverage
+- All tests passing (236 passed, 5 skipped)
+
+**Version: 0.1.0**
 - Initial release
 - Full device control and monitoring
 - Session injection support

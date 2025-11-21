@@ -135,6 +135,8 @@ class TestClientGetDevices:
             base_url=str(client.make_url("")),
         )
         thermacell_client._session = client.session
+        thermacell_client._api._session = client.session
+        thermacell_client._api._auth_handler = mock_auth
         thermacell_client._owns_session = False
         thermacell_client._auth_handler = mock_auth
 
@@ -168,6 +170,8 @@ class TestClientGetDevices:
             base_url=str(client.make_url("")),
         )
         thermacell_client._session = client.session
+        thermacell_client._api._session = client.session
+        thermacell_client._api._auth_handler = mock_auth
         thermacell_client._owns_session = False
         thermacell_client._auth_handler = mock_auth
 
@@ -195,6 +199,8 @@ class TestClientGetDevices:
             base_url=str(client.make_url("")),
         )
         thermacell_client._session = client.session
+        thermacell_client._api._session = client.session
+        thermacell_client._api._auth_handler = mock_auth
         thermacell_client._owns_session = False
         thermacell_client._auth_handler = mock_auth
 
@@ -220,6 +226,8 @@ class TestClientGetDevice:
             base_url=str(client.make_url("")),
         )
         thermacell_client._session = client.session
+        thermacell_client._api._session = client.session
+        thermacell_client._api._auth_handler = mock_auth
         thermacell_client._owns_session = False
         thermacell_client._auth_handler = mock_auth
 
@@ -246,127 +254,14 @@ class TestClientGetDevice:
             base_url=str(client.make_url("")),
         )
         thermacell_client._session = client.session
+        thermacell_client._api._session = client.session
+        thermacell_client._api._auth_handler = mock_auth
         thermacell_client._owns_session = False
         thermacell_client._auth_handler = mock_auth
 
         device = await thermacell_client.get_device("nonexistent")
 
         assert device is None
-
-
-class TestClientGetDeviceState:
-    """Test client.get_device_state() method."""
-
-    async def test_get_device_state_success(
-        self,
-        aiohttp_client: TestClient,
-        app: Application,
-        mock_auth: AsyncMock,
-    ) -> None:
-        """Test successfully getting device state."""
-        client = await aiohttp_client(app)
-
-        thermacell_client = ThermacellClient(
-            username="test@example.com",
-            password="password",
-            base_url=str(client.make_url("")),
-        )
-        thermacell_client._session = client.session
-        thermacell_client._owns_session = False
-        thermacell_client._auth_handler = mock_auth
-
-        state = await thermacell_client.get_device_state("node1")
-
-        assert state is not None
-        assert state.node_id == "node1"
-        assert state.info.name == "Test Device"
-        assert state.info.model == "Thermacell LIV Hub"
-        assert state.info.firmware_version == "5.3.2"
-        assert state.status.connected is True
-        assert state.params.power is True
-        assert state.params.led_brightness == 80
-        assert state.params.refill_life == 75.5
-
-    async def test_get_device_state_not_found(
-        self,
-        aiohttp_client: TestClient,
-        app: Application,
-        mock_auth: AsyncMock,
-    ) -> None:
-        """Test getting state for non-existent device."""
-        client = await aiohttp_client(app)
-
-        thermacell_client = ThermacellClient(
-            username="test@example.com",
-            password="password",
-            base_url=str(client.make_url("")),
-        )
-        thermacell_client._session = client.session
-        thermacell_client._owns_session = False
-        thermacell_client._auth_handler = mock_auth
-
-        state = await thermacell_client.get_device_state("nonexistent")
-
-        assert state is None
-
-
-class TestClientUpdateDeviceParams:
-    """Test client.update_device_params() method."""
-
-    async def test_update_device_params_success(
-        self,
-        aiohttp_client: TestClient,
-        app: Application,
-        mock_auth: AsyncMock,
-    ) -> None:
-        """Test successfully updating device parameters."""
-        client = await aiohttp_client(app)
-
-        thermacell_client = ThermacellClient(
-            username="test@example.com",
-            password="password",
-            base_url=str(client.make_url("")),
-        )
-        thermacell_client._session = client.session
-        thermacell_client._owns_session = False
-        thermacell_client._auth_handler = mock_auth
-
-        result = await thermacell_client.update_device_params(
-            "node1",
-            {"LIV Hub": {"Power": True}},
-        )
-
-        assert result is True
-
-    async def test_update_device_params_failure(
-        self,
-        aiohttp_client: TestClient,
-        mock_auth: AsyncMock,
-    ) -> None:
-        """Test update fails with error status."""
-        app = web.Application()
-
-        async def update_error(request: web.Request) -> web.Response:
-            return web.Response(status=HTTPStatus.BAD_REQUEST)
-
-        app.router.add_put("/v1/user/nodes/params", update_error)
-        client = await aiohttp_client(app)
-
-        thermacell_client = ThermacellClient(
-            username="test@example.com",
-            password="password",
-            base_url=str(client.make_url("")),
-        )
-        thermacell_client._session = client.session
-        thermacell_client._owns_session = False
-        thermacell_client._auth_handler = mock_auth
-
-        result = await thermacell_client.update_device_params(
-            "node1",
-            {"LIV Hub": {"Power": True}},
-        )
-
-        assert result is False
 
 
 class TestClientAuthenticationIntegration:
@@ -402,6 +297,8 @@ class TestClientAuthenticationIntegration:
             base_url=str(client.make_url("")),
         )
         thermacell_client._session = client.session
+        thermacell_client._api._session = client.session
+        thermacell_client._api._auth_handler = mock_auth
         thermacell_client._owns_session = False
         thermacell_client._auth_handler = mock_auth
 
@@ -422,11 +319,12 @@ class TestClientInitialization:
             password="password123",
         )
 
-        assert client._username == "test@example.com"
-        assert client._password == "password123"
-        assert client._base_url == "https://api.iot.thermacell.com"
-        assert client._session is None
-        assert client._owns_session is True
+        # Credentials are stored in auth handler, base_url in API
+        assert client._auth_handler is not None
+        assert client._api is not None
+        assert client._api._base_url == "https://api.iot.thermacell.com"
+        assert client._api._session is None
+        assert client._api._owns_session is True
 
     def test_init_with_custom_base_url(self) -> None:
         """Test initialization with custom base URL."""
@@ -436,7 +334,7 @@ class TestClientInitialization:
             base_url="https://custom.api.com/",
         )
 
-        assert client._base_url == "https://custom.api.com"
+        assert client._api._base_url == "https://custom.api.com"
 
     async def test_init_with_session(self, aiohttp_client: TestClient) -> None:
         """Test initialization with provided session."""
@@ -449,8 +347,9 @@ class TestClientInitialization:
             session=test_client.session,
         )
 
-        assert client._session == test_client.session
-        assert client._owns_session is False
+        # Session is stored in API layer
+        assert client._api._session == test_client.session
+        assert client._api._owns_session is False
 
     def test_init_creates_auth_handler(self) -> None:
         """Test initialization creates auth handler."""
@@ -460,6 +359,7 @@ class TestClientInitialization:
         )
 
         assert client._auth_handler is not None
+        assert client._api is not None
 
 
 class TestClientContextManager:
@@ -472,10 +372,12 @@ class TestClientContextManager:
             password="password123",
         )
         client._auth_handler = mock_auth
+        client._api._auth_handler = mock_auth
 
         async with client:
-            assert client._session is not None
-            assert client._owns_session is True
+            # Session is created in API layer
+            assert client._api._session is not None
+            assert client._api._owns_session is True
 
     async def test_context_manager_closes_owned_session(self, mock_auth: AsyncMock) -> None:
         """Test context manager closes session it created."""
@@ -484,9 +386,11 @@ class TestClientContextManager:
             password="password123",
         )
         client._auth_handler = mock_auth
+        client._api._auth_handler = mock_auth
 
         async with client:
-            session = client._session
+            # Session is created in API layer
+            session = client._api._session
             assert session is not None
             assert not session.closed
 
@@ -507,6 +411,7 @@ class TestClientContextManager:
             session=test_client.session,
         )
         client._auth_handler = mock_auth
+        client._api._auth_handler = mock_auth
 
         async with client:
             pass

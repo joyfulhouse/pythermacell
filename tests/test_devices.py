@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from http import HTTPStatus
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock
 
@@ -13,15 +14,45 @@ from pythermacell.models import DeviceInfo, DeviceParams, DeviceState, DeviceSta
 
 
 if TYPE_CHECKING:
-    from pythermacell.client import ThermacellClient
+    from pythermacell.api import ThermacellAPI
 
 
 @pytest.fixture
-def mock_client() -> ThermacellClient:
-    """Create a mock ThermacellClient."""
-    client = AsyncMock()
-    client.update_device_params = AsyncMock(return_value=True)
-    return client
+def mock_api() -> ThermacellAPI:
+    """Create a mock ThermacellAPI."""
+    api = AsyncMock()
+    # Mock update_node_params to return (200, {})
+    api.update_node_params = AsyncMock(return_value=(HTTPStatus.OK, {}))
+    # Mock get_node_* methods for refresh tests
+    api.get_node_params = AsyncMock(
+        return_value=(
+            HTTPStatus.OK,
+            {
+                "LIV Hub": {
+                    "Power": True,
+                    "LED Brightness": 80,
+                    "LED Hue": 120,
+                    "LED Saturation": 100,
+                    "Refill Life": 75.5,
+                    "System Runtime": 120,
+                    "System Status": 3,
+                    "Error": 0,
+                    "Enable Repellers": True,
+                }
+            },
+        )
+    )
+    api.get_node_status = AsyncMock(return_value=(HTTPStatus.OK, {"connectivity": {"connected": True}}))
+    api.get_node_config = AsyncMock(
+        return_value=(
+            HTTPStatus.OK,
+            {
+                "info": {"name": "Test Device", "type": "thermacell-hub", "fw_version": "5.3.3"},
+                "devices": [{"serial_num": "SN123456"}],
+            },
+        )
+    )
+    return api
 
 
 @pytest.fixture
@@ -73,17 +104,17 @@ def device_state(device_info: DeviceInfo, device_status: DeviceStatus, device_pa
 
 
 @pytest.fixture
-def device(mock_client: ThermacellClient, device_state: DeviceState) -> ThermacellDevice:
+def device(mock_api: ThermacellAPI, device_state: DeviceState) -> ThermacellDevice:
     """Create a ThermacellDevice instance."""
-    return ThermacellDevice(client=mock_client, state=device_state)
+    return ThermacellDevice(api=mock_api, state=device_state)
 
 
 class TestDeviceInitialization:
     """Test device initialization."""
 
-    async def test_init_with_state(self, mock_client: ThermacellClient, device_state: DeviceState) -> None:
+    async def test_init_with_state(self, mock_api: ThermacellAPI, device_state: DeviceState) -> None:
         """Test device initialization with state."""
-        device = ThermacellDevice(client=mock_client, state=device_state)
+        device = ThermacellDevice(api=mock_api, state=device_state)
 
         assert device.node_id == "test-node-123"
         assert device.name == "Test Device"
@@ -107,49 +138,49 @@ class TestDeviceInitialization:
 class TestDevicePowerControl:
     """Test device power control methods."""
 
-    async def test_turn_on(self, device: ThermacellDevice, mock_client: ThermacellClient) -> None:
+    async def test_turn_on(self, device: ThermacellDevice, mock_api: ThermacellAPI) -> None:
         """Test turning device on."""
         result = await device.turn_on()
 
         assert result is True
-        mock_client.update_device_params.assert_called_once_with(
+        mock_api.update_node_params.assert_called_once_with(
             device.node_id,
             {"LIV Hub": {"Enable Repellers": True}},
         )
 
-    async def test_turn_off(self, device: ThermacellDevice, mock_client: ThermacellClient) -> None:
+    async def test_turn_off(self, device: ThermacellDevice, mock_api: ThermacellAPI) -> None:
         """Test turning device off."""
         result = await device.turn_off()
 
         assert result is True
-        mock_client.update_device_params.assert_called_once_with(
+        mock_api.update_node_params.assert_called_once_with(
             device.node_id,
             {"LIV Hub": {"Enable Repellers": False}},
         )
 
-    async def test_set_power_on(self, device: ThermacellDevice, mock_client: ThermacellClient) -> None:
+    async def test_set_power_on(self, device: ThermacellDevice, mock_api: ThermacellAPI) -> None:
         """Test setting power to on."""
         result = await device.set_power(True)
 
         assert result is True
-        mock_client.update_device_params.assert_called_once_with(
+        mock_api.update_node_params.assert_called_once_with(
             device.node_id,
             {"LIV Hub": {"Enable Repellers": True}},
         )
 
-    async def test_set_power_off(self, device: ThermacellDevice, mock_client: ThermacellClient) -> None:
+    async def test_set_power_off(self, device: ThermacellDevice, mock_api: ThermacellAPI) -> None:
         """Test setting power to off."""
         result = await device.set_power(False)
 
         assert result is True
-        mock_client.update_device_params.assert_called_once_with(
+        mock_api.update_node_params.assert_called_once_with(
             device.node_id,
             {"LIV Hub": {"Enable Repellers": False}},
         )
 
-    async def test_turn_on_failure(self, device: ThermacellDevice, mock_client: ThermacellClient) -> None:
+    async def test_turn_on_failure(self, device: ThermacellDevice, mock_api: ThermacellAPI) -> None:
         """Test turn on when API call fails."""
-        mock_client.update_device_params.return_value = False
+        mock_api.update_node_params.return_value = (HTTPStatus.INTERNAL_SERVER_ERROR, None)
 
         result = await device.turn_on()
 
@@ -159,52 +190,52 @@ class TestDevicePowerControl:
 class TestLEDControl:
     """Test LED control methods."""
 
-    async def test_set_led_power_on(self, device: ThermacellDevice, mock_client: ThermacellClient) -> None:
+    async def test_set_led_power_on(self, device: ThermacellDevice, mock_api: ThermacellAPI) -> None:
         """Test turning LED on."""
         result = await device.set_led_power(True)
 
         assert result is True
-        mock_client.update_device_params.assert_called_once_with(
+        mock_api.update_node_params.assert_called_once_with(
             device.node_id,
             {"LIV Hub": {"LED Brightness": 100}},
         )
 
-    async def test_set_led_power_off(self, device: ThermacellDevice, mock_client: ThermacellClient) -> None:
+    async def test_set_led_power_off(self, device: ThermacellDevice, mock_api: ThermacellAPI) -> None:
         """Test turning LED off."""
         result = await device.set_led_power(False)
 
         assert result is True
-        mock_client.update_device_params.assert_called_once_with(
+        mock_api.update_node_params.assert_called_once_with(
             device.node_id,
             {"LIV Hub": {"LED Brightness": 0}},
         )
 
-    async def test_set_led_brightness_valid(self, device: ThermacellDevice, mock_client: ThermacellClient) -> None:
+    async def test_set_led_brightness_valid(self, device: ThermacellDevice, mock_api: ThermacellAPI) -> None:
         """Test setting LED brightness with valid value."""
         result = await device.set_led_brightness(50)
 
         assert result is True
-        mock_client.update_device_params.assert_called_once_with(
+        mock_api.update_node_params.assert_called_once_with(
             device.node_id,
             {"LIV Hub": {"LED Brightness": 50}},
         )
 
-    async def test_set_led_brightness_min(self, device: ThermacellDevice, mock_client: ThermacellClient) -> None:
+    async def test_set_led_brightness_min(self, device: ThermacellDevice, mock_api: ThermacellAPI) -> None:
         """Test setting LED brightness to minimum."""
         result = await device.set_led_brightness(0)
 
         assert result is True
-        mock_client.update_device_params.assert_called_once_with(
+        mock_api.update_node_params.assert_called_once_with(
             device.node_id,
             {"LIV Hub": {"LED Brightness": 0}},
         )
 
-    async def test_set_led_brightness_max(self, device: ThermacellDevice, mock_client: ThermacellClient) -> None:
+    async def test_set_led_brightness_max(self, device: ThermacellDevice, mock_api: ThermacellAPI) -> None:
         """Test setting LED brightness to maximum."""
         result = await device.set_led_brightness(100)
 
         assert result is True
-        mock_client.update_device_params.assert_called_once_with(
+        mock_api.update_node_params.assert_called_once_with(
             device.node_id,
             {"LIV Hub": {"LED Brightness": 100}},
         )
@@ -227,7 +258,7 @@ class TestLEDControl:
         assert exc_info.value.parameter_name == "brightness"
         assert exc_info.value.value == 101
 
-    async def test_set_led_color_valid(self, device: ThermacellDevice, mock_client: ThermacellClient) -> None:
+    async def test_set_led_color_valid(self, device: ThermacellDevice, mock_api: ThermacellAPI) -> None:
         """Test setting LED color with valid hue and brightness values.
 
         Note: Saturation is not supported - always assumed to be 100%.
@@ -235,7 +266,7 @@ class TestLEDControl:
         result = await device.set_led_color(hue=180, brightness=75)
 
         assert result is True
-        mock_client.update_device_params.assert_called_once_with(
+        mock_api.update_node_params.assert_called_once_with(
             device.node_id,
             {
                 "LIV Hub": {
@@ -245,19 +276,19 @@ class TestLEDControl:
             },
         )
 
-    async def test_set_led_color_min_values(self, device: ThermacellDevice, mock_client: ThermacellClient) -> None:
+    async def test_set_led_color_min_values(self, device: ThermacellDevice, mock_api: ThermacellAPI) -> None:
         """Test setting LED color with minimum values."""
         result = await device.set_led_color(hue=0, brightness=0)
 
         assert result is True
-        mock_client.update_device_params.assert_called_once()
+        mock_api.update_node_params.assert_called_once()
 
-    async def test_set_led_color_max_values(self, device: ThermacellDevice, mock_client: ThermacellClient) -> None:
+    async def test_set_led_color_max_values(self, device: ThermacellDevice, mock_api: ThermacellAPI) -> None:
         """Test setting LED color with maximum values."""
         result = await device.set_led_color(hue=360, brightness=100)
 
         assert result is True
-        mock_client.update_device_params.assert_called_once()
+        mock_api.update_node_params.assert_called_once()
 
     async def test_set_led_color_invalid_hue_low(self, device: ThermacellDevice) -> None:
         """Test setting LED color with hue below minimum."""
@@ -278,7 +309,7 @@ class TestLEDControl:
 class TestRefillControl:
     """Test refill-related methods."""
 
-    async def test_reset_refill(self, device: ThermacellDevice, mock_client: ThermacellClient) -> None:
+    async def test_reset_refill(self, device: ThermacellDevice, mock_api: ThermacellAPI) -> None:
         """Test resetting refill life to 100%.
 
         Uses default refill type 1 (100 Hour - Blue Cap).
@@ -286,7 +317,7 @@ class TestRefillControl:
         result = await device.reset_refill()
 
         assert result is True
-        mock_client.update_device_params.assert_called_once_with(
+        mock_api.update_node_params.assert_called_once_with(
             device.node_id,
             {"LIV Hub": {"Refill Reset": 1}},
         )
@@ -295,31 +326,51 @@ class TestRefillControl:
 class TestDeviceRefresh:
     """Test device state refresh."""
 
-    async def test_refresh_success(self, device: ThermacellDevice, mock_client: ThermacellClient) -> None:
+    async def test_refresh_success(self, device: ThermacellDevice, mock_api: ThermacellAPI) -> None:
         """Test refreshing device state."""
-        new_state = DeviceState(
-            info=DeviceInfo(
-                node_id="test-node-123",
-                name="Test Device",
-                model="Thermacell LIV Hub",
-                firmware_version="5.3.3",
-                serial_number="SN123456",
-            ),
-            status=DeviceStatus(node_id="test-node-123", connected=True),
-            params=DeviceParams(power=False),
+        # Mock the three API calls that refresh() makes
+        mock_api.get_node_params = AsyncMock(
+            return_value=(
+                HTTPStatus.OK,
+                {
+                    "LIV Hub": {
+                        "Power": False,
+                        "LED Brightness": 50,
+                        "LED Hue": 200,
+                        "LED Saturation": 100,
+                        "Refill Life": 50.0,
+                        "System Runtime": 60,
+                        "System Status": 1,
+                        "Error": 0,
+                        "Enable Repellers": False,
+                    }
+                },
+            )
         )
-        mock_client.get_device_state = AsyncMock(return_value=new_state)
+        mock_api.get_node_status = AsyncMock(return_value=(HTTPStatus.OK, {"connectivity": {"connected": True}}))
+        mock_api.get_node_config = AsyncMock(
+            return_value=(
+                HTTPStatus.OK,
+                {
+                    "info": {"name": "Test Device", "type": "thermacell-hub", "fw_version": "5.3.3"},
+                    "devices": [{"serial_num": "SN123456"}],
+                },
+            )
+        )
 
         result = await device.refresh()
 
         assert result is True
         assert device.firmware_version == "5.3.3"
         assert device.power is False
-        mock_client.get_device_state.assert_called_once_with(device.node_id)
+        assert device.led_brightness == 50
+        mock_api.get_node_params.assert_called_once_with(device.node_id)
+        mock_api.get_node_status.assert_called_once_with(device.node_id)
+        mock_api.get_node_config.assert_called_once_with(device.node_id)
 
-    async def test_refresh_failure(self, device: ThermacellDevice, mock_client: ThermacellClient) -> None:
+    async def test_refresh_failure(self, device: ThermacellDevice, mock_api: ThermacellAPI) -> None:
         """Test refresh when API call fails."""
-        mock_client.get_device_state = AsyncMock(return_value=None)
+        mock_api.get_node_params = AsyncMock(return_value=(HTTPStatus.INTERNAL_SERVER_ERROR, None))
 
         result = await device.refresh()
 
@@ -329,42 +380,42 @@ class TestDeviceRefresh:
 class TestDeviceStateProperties:
     """Test device state property accessors."""
 
-    async def test_offline_device(self, mock_client: ThermacellClient, device_state: DeviceState) -> None:
+    async def test_offline_device(self, mock_api: ThermacellAPI, device_state: DeviceState) -> None:
         """Test properties when device is offline."""
         device_state.status.connected = False
-        device = ThermacellDevice(client=mock_client, state=device_state)
+        device = ThermacellDevice(api=mock_api, state=device_state)
 
         assert device.is_online is False
 
-    async def test_powered_off_device(self, mock_client: ThermacellClient, device_state: DeviceState) -> None:
+    async def test_powered_off_device(self, mock_api: ThermacellAPI, device_state: DeviceState) -> None:
         """Test properties when device is powered off."""
         device_state.params.power = False
-        device = ThermacellDevice(client=mock_client, state=device_state)
+        device = ThermacellDevice(api=mock_api, state=device_state)
 
         assert device.is_powered_on is False
         assert device.power is False
 
-    async def test_device_with_error(self, mock_client: ThermacellClient, device_state: DeviceState) -> None:
+    async def test_device_with_error(self, mock_api: ThermacellAPI, device_state: DeviceState) -> None:
         """Test properties when device has error."""
         device_state.params.error = 5
-        device = ThermacellDevice(client=mock_client, state=device_state)
+        device = ThermacellDevice(api=mock_api, state=device_state)
 
         assert device.has_error is True
         assert device.error == 5
 
-    async def test_device_without_error(self, mock_client: ThermacellClient, device_state: DeviceState) -> None:
+    async def test_device_without_error(self, mock_api: ThermacellAPI, device_state: DeviceState) -> None:
         """Test properties when device has no error."""
         device_state.params.error = 0
-        device = ThermacellDevice(client=mock_client, state=device_state)
+        device = ThermacellDevice(api=mock_api, state=device_state)
 
         assert device.has_error is False
         assert device.error == 0
 
-    async def test_none_parameter_values(self, mock_client: ThermacellClient, device_state: DeviceState) -> None:
+    async def test_none_parameter_values(self, mock_api: ThermacellAPI, device_state: DeviceState) -> None:
         """Test properties when parameters are None."""
         device_state.params.power = None
         device_state.params.led_brightness = None
-        device = ThermacellDevice(client=mock_client, state=device_state)
+        device = ThermacellDevice(api=mock_api, state=device_state)
 
         assert device.power is None
         assert device.led_brightness is None

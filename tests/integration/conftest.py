@@ -99,8 +99,8 @@ async def shared_integration_client(integration_config: dict[str, str]) -> Async
     client = _client_cache[cache_key]
 
     # Clear session reference if it exists and is closed, so a new one gets created
-    if client._session is not None and client._session.closed:
-        client._session = None
+    if client._api._session is not None and client._api._session.closed:
+        client._api._session = None
         client._auth_handler._session = None
 
     # Enter context manager - creates session if needed, uses cached auth

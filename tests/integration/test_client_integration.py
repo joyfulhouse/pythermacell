@@ -153,8 +153,10 @@ class TestDeviceState:
         else:
             node_id = test_device_id
 
-        # Get device state
-        state = await client.get_device_state(node_id)
+        # Get device and access its internal state
+        device = await client.get_device(node_id)
+        assert device is not None, "Should return device"
+        state = device._state
 
         # Verify state structure
         assert state is not None, "Should return device state"
@@ -200,9 +202,11 @@ class TestDeviceState:
         else:
             node_id = test_device_id
 
-        # Get device state
-        state = await client.get_device_state(node_id)
-        assert state is not None, "Should return device state"
+        # Get device and access its state
+        device = await client.get_device(node_id)
+        assert device is not None, "Should return device"
+        state = device._state
+        assert state is not None, "Should have device state"
 
         params = state.params
 
@@ -294,12 +298,14 @@ class TestMultiDeviceScenarios:
         if len(devices) < 2:
             pytest.skip("Need at least 2 devices for concurrent test")
 
-        # Get state for all devices concurrently
-        states = await asyncio.gather(*[client.get_device_state(d.node_id) for d in devices])
+        # Get devices - this internally fetches state concurrently
+        # Devices already have their state loaded, just verify them
+        assert len(devices) > 0, "Should have devices"
+        assert all(d._state is not None for d in devices), "All devices should have state"
 
-        # Verify all states were retrieved
-        assert len(states) == len(devices), "Should get state for all devices"
-        assert all(s is not None for s in states), "All states should be non-None"
+        # Verify concurrent refresh works
+        await asyncio.gather(*[d.refresh() for d in devices])
+        assert all(d._state is not None for d in devices), "All states should be refreshed"
 
     async def test_multiple_clients_same_session(
         self, integration_config: dict[str, str], session: ClientSession

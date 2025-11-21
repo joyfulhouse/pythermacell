@@ -248,6 +248,8 @@ class TestClientGroupMethods:
             base_url=str(client.make_url("")),
         )
         thermacell_client._session = client.session
+        thermacell_client._api._session = client.session
+        thermacell_client._api._auth_handler = mock_auth
         thermacell_client._owns_session = False
         thermacell_client._auth_handler = mock_auth
 
@@ -283,6 +285,8 @@ class TestClientGroupMethods:
             base_url=str(client.make_url("")),
         )
         thermacell_client._session = client.session
+        thermacell_client._api._session = client.session
+        thermacell_client._api._auth_handler = mock_auth
         thermacell_client._owns_session = False
         thermacell_client._auth_handler = mock_auth
 
@@ -306,6 +310,8 @@ class TestClientGroupMethods:
             base_url=str(client.make_url("")),
         )
         thermacell_client._session = client.session
+        thermacell_client._api._session = client.session
+        thermacell_client._api._auth_handler = mock_auth
         thermacell_client._owns_session = False
         thermacell_client._auth_handler = mock_auth
 
@@ -331,6 +337,8 @@ class TestClientGroupMethods:
             base_url=str(client.make_url("")),
         )
         thermacell_client._session = client.session
+        thermacell_client._api._session = client.session
+        thermacell_client._api._auth_handler = mock_auth
         thermacell_client._owns_session = False
         thermacell_client._auth_handler = mock_auth
 
@@ -353,6 +361,8 @@ class TestClientGroupMethods:
             base_url=str(client.make_url("")),
         )
         thermacell_client._session = client.session
+        thermacell_client._api._session = client.session
+        thermacell_client._api._auth_handler = mock_auth
         thermacell_client._owns_session = False
         thermacell_client._auth_handler = mock_auth
 
@@ -378,6 +388,8 @@ class TestClientGroupMethods:
             base_url=str(client.make_url("")),
         )
         thermacell_client._session = client.session
+        thermacell_client._api._session = client.session
+        thermacell_client._api._auth_handler = mock_auth
         thermacell_client._owns_session = False
         thermacell_client._auth_handler = mock_auth
 
@@ -442,6 +454,8 @@ class TestClientGroupMethods:
             base_url=str(client.make_url("")),
         )
         thermacell_client._session = client.session
+        thermacell_client._api._session = client.session
+        thermacell_client._api._auth_handler = mock_auth
         thermacell_client._owns_session = False
         thermacell_client._auth_handler = mock_auth
 
@@ -466,6 +480,8 @@ class TestClientGroupMethods:
             base_url=str(client.make_url("")),
         )
         thermacell_client._session = client.session
+        thermacell_client._api._session = client.session
+        thermacell_client._api._auth_handler = mock_auth
         thermacell_client._owns_session = False
         thermacell_client._auth_handler = mock_auth
 
@@ -488,6 +504,8 @@ class TestClientGroupMethods:
             base_url=str(client.make_url("")),
         )
         thermacell_client._session = client.session
+        thermacell_client._api._session = client.session
+        thermacell_client._api._auth_handler = mock_auth
         thermacell_client._owns_session = False
         thermacell_client._auth_handler = mock_auth
 
@@ -510,6 +528,8 @@ class TestClientGroupMethods:
             base_url=str(client.make_url("")),
         )
         thermacell_client._session = client.session
+        thermacell_client._api._session = client.session
+        thermacell_client._api._auth_handler = mock_auth
         thermacell_client._owns_session = False
         thermacell_client._auth_handler = mock_auth
 
@@ -534,6 +554,8 @@ class TestClientGroupMethods:
             base_url=str(client.make_url("")),
         )
         thermacell_client._session = client.session
+        thermacell_client._api._session = client.session
+        thermacell_client._api._auth_handler = mock_auth
         thermacell_client._owns_session = False
         thermacell_client._auth_handler = mock_auth
 
@@ -556,6 +578,8 @@ class TestClientGroupMethods:
             base_url=str(client.make_url("")),
         )
         thermacell_client._session = client.session
+        thermacell_client._api._session = client.session
+        thermacell_client._api._auth_handler = mock_auth
         thermacell_client._owns_session = False
         thermacell_client._auth_handler = mock_auth
 
@@ -578,6 +602,8 @@ class TestClientGroupMethods:
             base_url=str(client.make_url("")),
         )
         thermacell_client._session = client.session
+        thermacell_client._api._session = client.session
+        thermacell_client._api._auth_handler = mock_auth
         thermacell_client._owns_session = False
         thermacell_client._auth_handler = mock_auth
 
@@ -600,6 +626,8 @@ class TestClientGroupMethods:
             base_url=str(client.make_url("")),
         )
         thermacell_client._session = client.session
+        thermacell_client._api._session = client.session
+        thermacell_client._api._auth_handler = mock_auth
         thermacell_client._owns_session = False
         thermacell_client._auth_handler = mock_auth
 
@@ -622,6 +650,8 @@ class TestClientGroupMethods:
             base_url=str(client.make_url("")),
         )
         thermacell_client._session = client.session
+        thermacell_client._api._session = client.session
+        thermacell_client._api._auth_handler = mock_auth
         thermacell_client._owns_session = False
         thermacell_client._auth_handler = mock_auth
 
