@@ -236,28 +236,62 @@ class ThermacellClient:
 
         return devices
 
-    async def get_device(self, node_id: str) -> ThermacellDevice | None:
-        """Get a specific device by node ID.
+    async def get_device(
+        self,
+        node_id: str,
+        *,
+        force_refresh: bool = False,
+        max_age_seconds: float | None = None,
+    ) -> ThermacellDevice | None:
+        """Get a specific device by node ID with intelligent caching.
 
-        Returns cached device object if available, otherwise creates a new one.
+        This method provides flexible control over state freshness:
+        - By default, returns cached device without refresh (fast, zero API calls)
+        - With force_refresh=True, always refreshes state (3 API calls)
+        - With max_age_seconds, refreshes only if state is stale
+
+        Performance:
+            - Cached, no refresh: 0 API calls
+            - Cached, needs refresh: 3 API calls
+            - New device: 3 API calls
 
         Args:
             node_id: The device's node ID.
+            force_refresh: If True, always refresh state even if cached.
+            max_age_seconds: If provided, refresh state if older than this many seconds.
+                           Takes precedence over force_refresh if both are provided.
 
         Returns:
             ThermacellDevice instance if found, None otherwise.
 
         Raises:
             ThermacellConnectionError: If connection fails.
+
+        Example:
+            >>> # Fast: return cached device (0 API calls)
+            >>> device = await client.get_device("node123")
+            >>>
+            >>> # Refresh only if stale (0-3 API calls)
+            >>> device = await client.get_device("node123", max_age_seconds=60)
+            >>>
+            >>> # Always refresh (3 API calls)
+            >>> device = await client.get_device("node123", force_refresh=True)
         """
         # Return cached device if available
         if node_id in self._devices:
             device = self._devices[node_id]
-            # Refresh state
-            await device.refresh()
+
+            # Determine if refresh is needed
+            should_refresh = force_refresh
+            if max_age_seconds is not None:
+                should_refresh = device.state_age_seconds > max_age_seconds
+
+            if should_refresh:
+                await device.refresh()
+
             return device
 
-        # Fetch state for new device
+        # Fetch state for new device (3 API calls)
         state = await self._fetch_device_state(node_id)
         if state is None:
             return None
@@ -521,8 +555,13 @@ class ThermacellClient:
     async def get_group_devices(self, group_id: str) -> list[ThermacellDevice]:
         """Get full device objects for all devices in a group.
 
-        This is a convenience method that combines get_group_nodes() with get_devices()
-        to return ThermacellDevice instances instead of just node IDs.
+        This method is optimized to fetch only devices in the specified group,
+        rather than fetching all user devices. This significantly reduces API calls.
+
+        Performance:
+            - Old: 1 + (3 * total_devices) API calls
+            - New: 1 + (3 * group_devices) API calls
+            - For 10 total devices with 2 in group: 32 calls → 7 calls (78% reduction)
 
         Args:
             group_id: The group's unique identifier.
@@ -534,17 +573,20 @@ class ThermacellClient:
             ThermacellConnectionError: If connection fails.
             AuthenticationError: If authentication fails.
         """
-        # Get node IDs in the group
+        # Get node IDs in the group (1 API call)
         node_ids = await self.get_group_nodes(group_id)
 
         if not node_ids:
             return []
 
-        # Get all devices
-        all_devices = await self.get_devices()
+        # Fetch only devices in this group concurrently (3 API calls per device)
+        devices = await asyncio.gather(
+            *[self.get_device(node_id, force_refresh=False) for node_id in node_ids],
+            return_exceptions=False,
+        )
 
-        # Filter devices by group membership
-        group_devices = [device for device in all_devices if device.node_id in node_ids]
+        # Filter out any None results (devices that no longer exist)
+        group_devices = [d for d in devices if d is not None]
 
         _LOGGER.debug("Group %s has %d device(s)", group_id, len(group_devices))
         return group_devices

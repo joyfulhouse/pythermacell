@@ -174,6 +174,19 @@ class ThermacellDevice:
         """Get timestamp of last state refresh."""
         return self._last_refresh
 
+    @property
+    def state_age_seconds(self) -> float:
+        """Get the age of the cached state in seconds.
+
+        Returns:
+            Number of seconds since the last state refresh.
+
+        Example:
+            >>> if device.state_age_seconds > 60:
+            ...     await device.refresh()
+        """
+        return (datetime.now(UTC) - self._last_refresh).total_seconds()
+
     # -------------------------------------------------------------------------
     # Device Parameter Properties (from DeviceParams)
     # -------------------------------------------------------------------------
