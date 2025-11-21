@@ -421,6 +421,29 @@ class TestDeviceStateProperties:
         assert device.led_brightness is None
         assert device.is_powered_on is False  # None treated as False
 
+    async def test_state_age_seconds(self, mock_api: ThermacellAPI, device_state: DeviceState) -> None:
+        """Test state_age_seconds property tracks time since last refresh."""
+        import asyncio
+
+        device = ThermacellDevice(api=mock_api, state=device_state)
+
+        # Immediately after creation, age should be near 0
+        initial_age = device.state_age_seconds
+        assert initial_age >= 0
+        assert initial_age < 0.1  # Should be very recent
+
+        # Wait a bit and check age has increased
+        await asyncio.sleep(0.2)
+        age_after_wait = device.state_age_seconds
+        assert age_after_wait >= 0.2
+        assert age_after_wait < 0.3  # Allow some margin
+
+        # After refresh, age should reset
+        await device.refresh()
+        age_after_refresh = device.state_age_seconds
+        assert age_after_refresh >= 0
+        assert age_after_refresh < 0.1  # Should be very recent again
+
 
 class TestDeviceRepresentation:
     """Test device string representation."""

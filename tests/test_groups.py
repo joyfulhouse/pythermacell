@@ -461,9 +461,98 @@ class TestClientGroupMethods:
 
         devices = await thermacell_client.get_group_devices("group-1")
 
-        assert len(devices) == 2
+        assert len(devices) == 3  # SAMPLE_GROUP_NODES_RESPONSE has 3 nodes
         assert all(hasattr(d, "node_id") for d in devices)
         assert all(hasattr(d, "name") for d in devices)
+
+    async def test_get_group_devices_optimized(
+        self,
+        aiohttp_client: TestClient,
+        mock_auth: AsyncMock,
+    ) -> None:
+        """Test that get_group_devices only fetches devices in the group (optimization)."""
+        call_counts = {"nodes": 0, "params": 0, "status": 0, "config": 0}
+
+        # Create custom app to count API calls
+        app = web.Application()
+
+        async def get_nodes_with_group(request: web.Request) -> web.Response:
+            """Return nodes for specific group."""
+            group_id = request.query.get("group_id")
+            call_counts["nodes"] += 1
+            if group_id == "group-1":
+                # Group has 2 devices out of 10 total
+                return web.json_response({"nodes": ["node-1", "node-2"], "total": 2})
+            # All devices (should NOT be called)
+            return web.json_response(
+                {"nodes": [f"node-{i}" for i in range(1, 11)], "total": 10}
+            )
+
+        async def count_params(request: web.Request) -> web.Response:
+            call_counts["params"] += 1
+            return web.json_response(
+                {
+                    "LIV Hub": {
+                        "Enable Repellers": True,
+                        "LED Brightness": 80,
+                        "LED Hue": 120,
+                        "LED Saturation": 100,
+                    }
+                }
+            )
+
+        async def count_status(request: web.Request) -> web.Response:
+            call_counts["status"] += 1
+            return web.json_response({"connectivity": {"connected": True}})
+
+        async def count_config(request: web.Request) -> web.Response:
+            call_counts["config"] += 1
+            node_id = request.query.get("nodeid", "node-1")
+            return web.json_response(
+                {
+                    "node_id": node_id,
+                    "info": {
+                        "name": f"Device {node_id}",
+                        "type": "thermacell-hub",
+                        "fw_version": "5.3.2",
+                    },
+                    "devices": [{"name": "LIV Hub", "serial_num": "SN123"}],
+                }
+            )
+
+        app.router.add_get("/v1/user/nodes", get_nodes_with_group)
+        app.router.add_get("/v1/user/nodes/params", count_params)
+        app.router.add_get("/v1/user/nodes/status", count_status)
+        app.router.add_get("/v1/user/nodes/config", count_config)
+
+        client = await aiohttp_client(app)
+
+        thermacell_client = ThermacellClient(
+            username="test@example.com",
+            password="password",
+            base_url=str(client.make_url("")),
+        )
+        thermacell_client._session = client.session
+        thermacell_client._api._session = client.session
+        thermacell_client._api._auth_handler = mock_auth
+        thermacell_client._owns_session = False
+        thermacell_client._auth_handler = mock_auth
+
+        # Get devices for group with 2 devices (out of 10 total)
+        devices = await thermacell_client.get_group_devices("group-1")
+
+        # Verify we got the correct devices
+        assert len(devices) == 2
+        assert devices[0].node_id == "node-1"
+        assert devices[1].node_id == "node-2"
+
+        # Verify optimization: only 7 API calls instead of 32
+        # 1 (get group nodes) + 2 * 3 (fetch 2 devices) = 7 calls
+        # Old behavior would be: 1 (get group nodes) + 1 (get all nodes) + 10 * 3 (fetch all devices) = 32 calls
+        assert call_counts["nodes"] == 1  # Only get group nodes
+        assert call_counts["params"] == 2  # Only 2 devices fetched
+        assert call_counts["status"] == 2
+        assert call_counts["config"] == 2
 
     async def test_create_group_success(
         self,

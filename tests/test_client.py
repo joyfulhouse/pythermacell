@@ -263,6 +263,239 @@ class TestClientGetDevice:
 
         assert device is None
 
+    async def test_get_device_cached_no_refresh(
+        self,
+        aiohttp_client: TestClient,
+        app: Application,
+        mock_auth: AsyncMock,
+    ) -> None:
+        """Test getting cached device without refresh (0 API calls)."""
+        client = await aiohttp_client(app)
+        call_counts = {"params": 0, "status": 0, "config": 0}
+
+        # Create custom app to count API calls
+        app_with_counter = web.Application()
+
+        async def count_params(request: web.Request) -> web.Response:
+            call_counts["params"] += 1
+            return web.json_response(SAMPLE_PARAMS_RESPONSE)
+
+        async def count_status(request: web.Request) -> web.Response:
+            call_counts["status"] += 1
+            return web.json_response(SAMPLE_STATUS_RESPONSE)
+
+        async def count_config(request: web.Request) -> web.Response:
+            call_counts["config"] += 1
+            node_id = request.query.get("nodeid")
+            config = SAMPLE_CONFIG_RESPONSE.copy()
+            config["node_id"] = node_id or "node1"
+            return web.json_response(config)
+
+        app_with_counter.router.add_get("/v1/user/nodes/params", count_params)
+        app_with_counter.router.add_get("/v1/user/nodes/status", count_status)
+        app_with_counter.router.add_get("/v1/user/nodes/config", count_config)
+
+        test_client = await aiohttp_client(app_with_counter)
+        thermacell_client = ThermacellClient(
+            username="test@example.com",
+            password="password",
+            base_url=str(test_client.make_url("")),
+        )
+        thermacell_client._session = test_client.session
+        thermacell_client._api._session = test_client.session
+        thermacell_client._api._auth_handler = mock_auth
+        thermacell_client._owns_session = False
+        thermacell_client._auth_handler = mock_auth
+
+        # First call: fetch device (3 API calls)
+        device1 = await thermacell_client.get_device("node1")
+        assert device1 is not None
+        assert call_counts["params"] == 1
+        assert call_counts["status"] == 1
+        assert call_counts["config"] == 1
+
+        # Second call: return cached device without refresh (0 API calls)
+        device2 = await thermacell_client.get_device("node1", force_refresh=False)
+        assert device2 is device1  # Same instance
+        assert call_counts["params"] == 1  # No additional calls
+        assert call_counts["status"] == 1
+        assert call_counts["config"] == 1
+
+    async def test_get_device_force_refresh(
+        self,
+        aiohttp_client: TestClient,
+        app: Application,
+        mock_auth: AsyncMock,
+    ) -> None:
+        """Test force_refresh parameter refreshes cached device."""
+        client = await aiohttp_client(app)
+        call_counts = {"params": 0, "status": 0, "config": 0}
+
+        # Create custom app to count API calls
+        app_with_counter = web.Application()
+
+        async def count_params(request: web.Request) -> web.Response:
+            call_counts["params"] += 1
+            return web.json_response(SAMPLE_PARAMS_RESPONSE)
+
+        async def count_status(request: web.Request) -> web.Response:
+            call_counts["status"] += 1
+            return web.json_response(SAMPLE_STATUS_RESPONSE)
+
+        async def count_config(request: web.Request) -> web.Response:
+            call_counts["config"] += 1
+            node_id = request.query.get("nodeid")
+            config = SAMPLE_CONFIG_RESPONSE.copy()
+            config["node_id"] = node_id or "node1"
+            return web.json_response(config)
+
+        app_with_counter.router.add_get("/v1/user/nodes/params", count_params)
+        app_with_counter.router.add_get("/v1/user/nodes/status", count_status)
+        app_with_counter.router.add_get("/v1/user/nodes/config", count_config)
+
+        test_client = await aiohttp_client(app_with_counter)
+        thermacell_client = ThermacellClient(
+            username="test@example.com",
+            password="password",
+            base_url=str(test_client.make_url("")),
+        )
+        thermacell_client._session = test_client.session
+        thermacell_client._api._session = test_client.session
+        thermacell_client._api._auth_handler = mock_auth
+        thermacell_client._owns_session = False
+        thermacell_client._auth_handler = mock_auth
+
+        # First call: fetch device (3 API calls)
+        device1 = await thermacell_client.get_device("node1")
+        assert device1 is not None
+        assert call_counts["params"] == 1
+        assert call_counts["status"] == 1
+        assert call_counts["config"] == 1
+
+        # Second call with force_refresh: refresh device (3 more API calls)
+        device2 = await thermacell_client.get_device("node1", force_refresh=True)
+        assert device2 is device1  # Same instance
+        assert call_counts["params"] == 2  # Refreshed
+        assert call_counts["status"] == 2  # Refreshed
+        assert call_counts["config"] == 2  # Refreshed
+
+    async def test_get_device_max_age_not_stale(
+        self,
+        aiohttp_client: TestClient,
+        app: Application,
+        mock_auth: AsyncMock,
+    ) -> None:
+        """Test max_age_seconds doesn't refresh if state is fresh."""
+        client = await aiohttp_client(app)
+        call_counts = {"params": 0, "status": 0, "config": 0}
+
+        # Create custom app to count API calls
+        app_with_counter = web.Application()
+
+        async def count_params(request: web.Request) -> web.Response:
+            call_counts["params"] += 1
+            return web.json_response(SAMPLE_PARAMS_RESPONSE)
+
+        async def count_status(request: web.Request) -> web.Response:
+            call_counts["status"] += 1
+            return web.json_response(SAMPLE_STATUS_RESPONSE)
+
+        async def count_config(request: web.Request) -> web.Response:
+            call_counts["config"] += 1
+            node_id = request.query.get("nodeid")
+            config = SAMPLE_CONFIG_RESPONSE.copy()
+            config["node_id"] = node_id or "node1"
+            return web.json_response(config)
+
+        app_with_counter.router.add_get("/v1/user/nodes/params", count_params)
+        app_with_counter.router.add_get("/v1/user/nodes/status", count_status)
+        app_with_counter.router.add_get("/v1/user/nodes/config", count_config)
+
+        test_client = await aiohttp_client(app_with_counter)
+        thermacell_client = ThermacellClient(
+            username="test@example.com",
+            password="password",
+            base_url=str(test_client.make_url("")),
+        )
+        thermacell_client._session = test_client.session
+        thermacell_client._api._session = test_client.session
+        thermacell_client._api._auth_handler = mock_auth
+        thermacell_client._owns_session = False
+        thermacell_client._auth_handler = mock_auth
+
+        # First call: fetch device (3 API calls)
+        device1 = await thermacell_client.get_device("node1")
+        assert device1 is not None
+        assert call_counts["params"] == 1
+
+        # Second call with max_age_seconds=60: state is fresh, no refresh (0 API calls)
+        device2 = await thermacell_client.get_device("node1", max_age_seconds=60)
+        assert device2 is device1
+        assert call_counts["params"] == 1  # No refresh
+        assert call_counts["status"] == 1
+        assert call_counts["config"] == 1
+
+    async def test_get_device_max_age_stale(
+        self,
+        aiohttp_client: TestClient,
+        app: Application,
+        mock_auth: AsyncMock,
+    ) -> None:
+        """Test max_age_seconds refreshes if state is stale."""
+        import asyncio
+
+        client = await aiohttp_client(app)
+        call_counts = {"params": 0, "status": 0, "config": 0}
+
+        # Create custom app to count API calls
+        app_with_counter = web.Application()
+
+        async def count_params(request: web.Request) -> web.Response:
+            call_counts["params"] += 1
+            return web.json_response(SAMPLE_PARAMS_RESPONSE)
+
+        async def count_status(request: web.Request) -> web.Response:
+            call_counts["status"] += 1
+            return web.json_response(SAMPLE_STATUS_RESPONSE)
+
+        async def count_config(request: web.Request) -> web.Response:
+            call_counts["config"] += 1
+            node_id = request.query.get("nodeid")
+            config = SAMPLE_CONFIG_RESPONSE.copy()
+            config["node_id"] = node_id or "node1"
+            return web.json_response(config)
+
+        app_with_counter.router.add_get("/v1/user/nodes/params", count_params)
+        app_with_counter.router.add_get("/v1/user/nodes/status", count_status)
+        app_with_counter.router.add_get("/v1/user/nodes/config", count_config)
+
+        test_client = await aiohttp_client(app_with_counter)
+        thermacell_client = ThermacellClient(
+            username="test@example.com",
+            password="password",
+            base_url=str(test_client.make_url("")),
+        )
+        thermacell_client._session = test_client.session
+        thermacell_client._api._session = test_client.session
+        thermacell_client._api._auth_handler = mock_auth
+        thermacell_client._owns_session = False
+        thermacell_client._auth_handler = mock_auth
+
+        # First call: fetch device (3 API calls)
+        device1 = await thermacell_client.get_device("node1")
+        assert device1 is not None
+        assert call_counts["params"] == 1
+
+        # Wait for state to become stale
+        await asyncio.sleep(0.2)
+
+        # Second call with max_age_seconds=0.1: state is stale, refresh (3 API calls)
+        device2 = await thermacell_client.get_device("node1", max_age_seconds=0.1)
+        assert device2 is device1
+        assert call_counts["params"] == 2  # Refreshed
+        assert call_counts["status"] == 2  # Refreshed
+        assert call_counts["config"] == 2  # Refreshed
+
 
 class TestClientAuthenticationIntegration:
     """Test authentication integration."""
