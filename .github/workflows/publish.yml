@@ -181,7 +181,7 @@ jobs:
     name: Publish to PyPI
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [build, publish-testpypi]
+    needs: [build]
     if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'pypi')
     environment: pypi
     permissions:
