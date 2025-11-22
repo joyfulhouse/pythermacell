@@ -1,0 +1,930 @@
+openapi: 3.0.0
+info:
+  title: Thermacell IoT API
+  description: |
+    Thermacell-specific implementation of the ESP RainMaker API for controlling
+    Thermacell LIV mosquito repeller devices.
+
+    This API is based on the ESP RainMaker platform specification and has been
+    validated against the Thermacell LIV Android application (v1.5.0+) and
+    production Home Assistant integration.
+
+    **Base URL**: https://api.iot.thermacell.com
+    **OAuth URL**: https://3pauth.iot.thermacell.com
+
+    **Authentication Flow**:
+    1. Authenticate with username/password via `/v1/login2`
+    2. Extract `accesstoken` (for Authorization header) and `idtoken` (contains user metadata)
+    3. Decode `idtoken` JWT payload to get `custom:user_id` field
+    4. Use `accesstoken` in Authorization header for all subsequent requests
+    5. Re-authenticate on 401 responses (token expiration)
+
+    **Note**: Double slashes are not allowed in URLs
+
+  version: 1.0.0
+  contact:
+    name: pythermacell
+    url: https://github.com/joyfulhouse/pythermacell
+  license:
+    name: Apache 2.0
+    url: http://www.apache.org/licenses/LICENSE-2.0.html
+  termsOfService: https://rainmaker.espressif.com/docs/terms-of-use
+
+servers:
+  - url: https://api.iot.thermacell.com
+    description: Production Thermacell IoT API (ESP RainMaker platform)
+  - url: https://3pauth.iot.thermacell.com
+    description: OAuth 2.0 authentication server (for social login)
+
+tags:
+  - name: Authentication
+    description: User authentication and JWT token management
+  - name: Node Discovery
+    description: Device discovery and node listing
+  - name: Node Status
+    description: Real-time device connectivity and status
+  - name: Node Configuration
+    description: Device configuration, firmware, and metadata
+  - name: Node Parameters
+    description: Device state retrieval and control operations
+
+paths:
+  /{version}/login2:
+    post:
+      tags:
+        - Authentication
+      summary: Handle login or extend session request from the user
+      description: |
+        This API will be used by the users to Login to RainMaker or to extend an existing session.
+
+        If MFA is enabled, then an SMS will be sent to the phone number after authentication with password.
+        Then, verifying the code and session will lead to successful login of the user.
+
+        **Token Structure**:
+        - `accesstoken`: JWT token for Authorization header
+        - `idtoken`: JWT token containing user metadata
+        - `refreshtoken`: Token for extending session
+
+        **JWT Payload Decoding**:
+        ```python
+        import base64, json
+        parts = idtoken.split(".")
+        payload = parts[1]
+        padding = 4 - len(payload) % 4
+        if padding != 4:
+            payload += "=" * padding
+        decoded = base64.urlsafe_b64decode(payload)
+        payload_data = json.loads(decoded.decode("utf-8"))
+        user_id = payload_data.get("custom:user_id")
+        ```
+
+      operationId: login2
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/ApiVersion'
+      requestBody:
+        required: true
+        description: username and password for Login
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/UserLoginRequest'
+                - $ref: '#/components/schemas/ExtendSessionRequest'
+            examples:
+              userLoginWithPassword:
+                summary: User Login with password
+                value:
+                  user_name: 'user@example.com'
+                  password: 'password123'
+              extendSession:
+                summary: Extend Session with refresh token
+                value:
+                  refreshtoken: 'refreshtoken_value'
+      responses:
+        '200':
+          description: success
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/LoginSuccessResponse'
+                  - $ref: '#/components/schemas/LoginExtendSessionResponse'
+              examples:
+                userLogin:
+                  summary: User Login successful
+                  value:
+                    status: 'success'
+                    description: 'Login successful'
+                    idtoken: '<JWT_ID_TOKEN: Contains user metadata including custom:user_id>'
+                    accesstoken: '<JWT_ACCESS_TOKEN: Use in Authorization header for API calls>'
+                    refreshtoken: 'refresh_token_value'
+                extendSession:
+                  summary: Session extended successfully
+                  value:
+                    status: 'success'
+                    description: 'Login successful'
+                    idtoken: 'new_idtoken'
+                    accesstoken: 'new_accesstoken'
+        '400':
+          description: |
+            failure
+
+            Error Codes and Error Description:
+            - 100006: Invalid request body
+            - 101002: Email-id is not in correct format
+            - 101009: Incorrect user name or password
+            - 101015: Account is not verified
+            - 101016: Login failed
+            - 101017: Refresh token failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /{version}/logout2:
+    post:
+      tags:
+        - Authentication
+      summary: Log out user from the session
+      description: |
+        This API will be used by the users to Logout from Rainmaker session.
+        If optionally refreshtoken is provided, the token is revoked.
+      operationId: logout2
+      security:
+        - AccessToken: []
+      parameters:
+        - $ref: '#/components/parameters/ApiVersion'
+        - name: logout_all
+          in: query
+          description: "Using this flag the user can be logged out from all sessions or only current session. The possible values are true and false."
+          required: false
+          schema:
+            type: string
+            default: 'false'
+            enum: ['true', 'false']
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                refreshtoken:
+                  type: string
+                  description: Optional refresh token to revoke
+      responses:
+        '200':
+          description: success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APISuccessResponse'
+        '400':
+          description: |
+            failure
+
+            Error Codes and Error Description:
+            - 100002: API Version is not supported
+            - 101036: Error, Invalid logout_all value specified. [Valid values are true/false]
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /{version}/user/nodes:
+    get:
+      tags:
+        - Node Discovery
+      summary: Get the nodes associated with the user
+      description: |
+        Get list of all nodes (devices) associated with the authenticated user.
+
+        Optional query parameters allow retrieving detailed information including:
+        - Node configuration (firmware, model, serial number)
+        - Node status (connectivity)
+        - Node parameters (device state)
+
+        For Thermacell LIV devices, each node represents a LIV Hub.
+
+      operationId: getUserNodes
+      security:
+        - AccessToken: []
+      parameters:
+        - $ref: '#/components/parameters/ApiVersion'
+        - name: node_id
+          in: query
+          description: node Id of node to get the node details
+          required: false
+          schema:
+            type: string
+            example: ABCD1234EFGH5678
+        - name: node_details
+          in: query
+          description: optional flag (true/false), to indicate if the node details are required in the response
+          required: false
+          schema:
+            type: boolean
+            default: false
+        - name: status
+          in: query
+          description: optional flag (true/false), to indicate if the node details should contain status in the response or not
+          required: false
+          schema:
+            type: boolean
+            default: true
+        - name: config
+          in: query
+          description: optional flag (true/false), to indicate if the node details should contain config in the response or not
+          required: false
+          schema:
+            type: boolean
+            default: true
+        - name: params
+          in: query
+          description: optional flag (true/false), to indicate if the node details should contain params in the response or not
+          required: false
+          schema:
+            type: boolean
+            default: true
+      responses:
+        '200':
+          description: success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetNodesList"
+              examples:
+                simpleList:
+                  summary: Simple list of node IDs
+                  value:
+                    nodes:
+                      - "ABCD1234EFGH5678"
+                      - "WXYZ9876STUV4321"
+                detailedList:
+                  summary: Detailed node information
+                  value:
+                    node_details:
+                      - id: "ABCD1234EFGH5678"
+                        node_name: "ADU LIV Hub"
+                        type: "LIV Hub"
+                        config:
+                          node_id: "ABCD1234EFGH5678"
+                          info:
+                            fw_version: "5.3.2"
+                            model: "thermacell-hub"
+                            serial_num: "TC-LIV-123456"
+                        status:
+                          connectivity:
+                            connected: true
+                            timestamp: 1704067200
+                        params:
+                          LIV Hub:
+                            Name: "ADU"
+                            Power: true
+                            Enable Repellers: true
+                            LED Brightness: 80
+                            LED Hue: 240
+                            LED Saturation: 100
+                            Refill Life: 87.5
+                            System Runtime: 715
+                            System Status: 3
+                            Error: 0
+        '400':
+          description: failure
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        '404':
+          description: |
+            failure
+
+            Error Codes and Error Description:
+            - 100015: Nodes do not exist
+        '500':
+          description: failure
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /{version}/user/nodes/status:
+    get:
+      tags:
+        - Node Status
+      summary: Get the online or offline status for the node
+      description: |
+        Get real-time connectivity status for a specific node.
+
+        The status indicates whether the device is currently connected to the cloud.
+
+      operationId: getNodeStatus
+      security:
+        - AccessToken: []
+      parameters:
+        - $ref: '#/components/parameters/ApiVersion'
+        - $ref: '#/components/parameters/NodeId'
+      responses:
+        '200':
+          description: success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NodeConnectivity"
+              example:
+                connectivity:
+                  connected: true
+                  timestamp: 1704067200
+        '400':
+          description: |
+            failure
+
+            Error Codes and Error Description:
+            - 100002: API Version is not supported
+            - 100009: Node Id is missing
+            - 102005: Getting node parameter failed
+            - 103020: Node does not belong to user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        '500':
+          description: failure
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /{version}/user/nodes/config:
+    get:
+      tags:
+        - Node Configuration
+      summary: Get the configuration for the node
+      description: |
+        Get device configuration including model, firmware version, and serial number.
+
+        This endpoint provides static device information that rarely changes.
+
+      operationId: getUserNodeConfiguration
+      security:
+        - AccessToken: []
+      parameters:
+        - $ref: '#/components/parameters/ApiVersion'
+        - $ref: '#/components/parameters/NodeId'
+      responses:
+        '200':
+          description: success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NodeConfiguration"
+              example:
+                node_id: "ABCD1234EFGH5678"
+                config_version: "2024-01-01"
+                info:
+                  fw_version: "5.3.2"
+                  model: "thermacell-hub"
+                  serial_num: "TC-LIV-123456"
+                  platform: "esp32"
+        '400':
+          description: |
+            failure
+
+            Error Codes and Error Description:
+            - 100002: API Version is not supported
+            - 100007: Either User Id or User Email needs to be provided
+            - 100009: Node Id is missing
+            - 100010: Node does not belong to user
+            - 100011: Invalid JSON received
+            - 103001: Fetching nodes failed
+            - 103002: Node config not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        '500':
+          description: failure
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /{version}/user/nodes/params:
+    get:
+      tags:
+        - Node Parameters
+      summary: Get the Node parameter
+      description: |
+        Get current device state and parameters.
+
+        For Thermacell LIV Hub, this returns:
+        - Power state (Enable Repellers)
+        - LED settings (Brightness, Hue, Saturation)
+        - Refill life percentage
+        - System runtime (session time in minutes)
+        - System status (1=Off, 2=Warming, 3=Protected)
+        - Error codes
+
+      operationId: getnodestate
+      security:
+        - AccessToken: []
+      parameters:
+        - $ref: '#/components/parameters/ApiVersion'
+        - $ref: '#/components/parameters/NodeId'
+      responses:
+        '200':
+          description: success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NodeParameters"
+              example:
+                LIV Hub:
+                  Name: "ADU"
+                  Power: true
+                  Enable Repellers: true
+                  LED Power: true
+                  LED Brightness: 80
+                  LED Hue: 240
+                  LED Saturation: 100
+                  Refill Life: 87.5
+                  System Runtime: 715
+                  System Status: 3
+                  Error: 0
+        '400':
+          description: |
+            failure
+
+            Error codes and Error Description:
+            - 100002: API Version is not supported
+            - 100009: Node Id is missing
+            - 100010: Node does not belong to user
+            - 102003: Getting node status failed
+            - 102004: Node does not exist
+            - 102006: Device reported state not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        '500':
+          description: failure
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    put:
+      tags:
+        - Node Parameters
+      summary: Update the Node Parameter
+      description: |
+        Update device parameters to control the Thermacell LIV hub.
+
+        **Supported Operations**:
+        - Turn device on/off (Enable Repellers)
+        - Control LED brightness, color
+        - Reset refill life counter
+
+        **Color Control**:
+        - Hue: 0-360 (HSV color wheel)
+        - Saturation: 0-100 (color intensity)
+        - Brightness: 0-100 (LED brightness)
+
+        **Important Notes**:
+        - Only include parameters you want to change
+        - LED is only "on" when hub is powered AND brightness > 0
+        - Parameters are applied immediately
+        - Refill Reset uses a counter value (1 to trigger reset)
+
+        **API accepts node_id as either**:
+        - Query parameter: `?node_id=ABCD1234EFGH5678`
+        - In request body (legacy format)
+
+      operationId: updatenodestate
+      security:
+        - AccessToken: []
+      parameters:
+        - $ref: '#/components/parameters/ApiVersion'
+        - name: node_id
+          in: query
+          description: node id (optional if provided in request body)
+          required: false
+          schema:
+            type: string
+      requestBody:
+        required: true
+        description: Request body for updating Node Parameter
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NodeParameterUpdate"
+            examples:
+              turnOn:
+                summary: Turn device on
+                value:
+                  LIV Hub:
+                    Enable Repellers: true
+              turnOff:
+                summary: Turn device off
+                value:
+                  LIV Hub:
+                    Enable Repellers: false
+              setLEDColor:
+                summary: Set LED color to blue (HSV)
+                value:
+                  LIV Hub:
+                    LED Hue: 240
+                    LED Saturation: 100
+                    LED Brightness: 80
+              setLEDBrightness:
+                summary: Set LED brightness to 50%
+                value:
+                  LIV Hub:
+                    LED Brightness: 50
+              turnLEDOff:
+                summary: Turn LED off
+                value:
+                  LIV Hub:
+                    LED Brightness: 0
+              resetRefill:
+                summary: Reset refill life counter to 100%
+                value:
+                  LIV Hub:
+                    Refill Reset: 1
+              multipleParams:
+                summary: Turn on with custom LED settings
+                value:
+                  LIV Hub:
+                    Enable Repellers: true
+                    LED Brightness: 100
+                    LED Hue: 120
+                    LED Saturation: 100
+      responses:
+        '200':
+          description: success if node_id provided as a query parameter
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APISuccessResponse'
+        '201':
+          description: Parameters updated successfully (alternative success code)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APISuccessResponse'
+        '204':
+          description: Parameters updated successfully (no content)
+        '400':
+          description: |
+            failure
+
+            Error codes and Error Description:
+            - 100002: API Version is not supported
+            - 100009: Node Id is missing
+            - 100010: Node does not belong to user
+            - 100012: Invalid Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        '500':
+          description: |
+            failure
+
+            Error codes and Error Description:
+            - 102002: Updating node parameter failed
+            - 100001: Error in fetching user details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+components:
+  securitySchemes:
+    AccessToken:
+      type: http
+      scheme: bearer
+      description: |
+        JWT access token obtained from `/v1/login2` endpoint.
+        Include the token in the Authorization header without "Bearer" prefix.
+
+        Example: `Authorization: <JWT_ACCESS_TOKEN: Use in Authorization header for API calls>`
+
+  parameters:
+    ApiVersion:
+      name: version
+      in: path
+      description: API Version (Current supported API Version is 'v1')
+      required: true
+      schema:
+        type: string
+        default: 'v1'
+
+    NodeId:
+      name: node_id
+      in: query
+      description: Node identifier
+      required: true
+      schema:
+        type: string
+      example: ABCD1234EFGH5678
+
+  schemas:
+    UserLoginRequest:
+      type: object
+      required:
+        - user_name
+        - password
+      properties:
+        user_name:
+          type: string
+          description: User's email address or +Mobile Number with country code
+          example: user@example.com
+        password:
+          type: string
+          format: password
+          description: User's password (8-256 characters, alphanumeric, no whitespace, mixed case with numbers)
+          example: MySecurePassword123
+
+    ExtendSessionRequest:
+      type: object
+      required:
+        - refreshtoken
+      properties:
+        refreshtoken:
+          type: string
+          description: Refresh token to extend session
+          example: refresh_token_value
+
+    LoginSuccessResponse:
+      type: object
+      required:
+        - status
+        - description
+        - idtoken
+        - accesstoken
+        - refreshtoken
+      properties:
+        status:
+          type: string
+          enum: [success]
+          example: success
+        description:
+          type: string
+          example: Login successful
+        idtoken:
+          type: string
+          description: JWT ID token containing user metadata
+        accesstoken:
+          type: string
+          description: JWT access token for Authorization header
+        refreshtoken:
+          type: string
+          description: Refresh token for extending session
+
+    LoginExtendSessionResponse:
+      type: object
+      required:
+        - status
+        - description
+        - idtoken
+        - accesstoken
+      properties:
+        status:
+          type: string
+          enum: [success]
+        description:
+          type: string
+          example: Login successful
+        idtoken:
+          type: string
+        accesstoken:
+          type: string
+
+    APISuccessResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [success]
+          example: success
+        description:
+          type: string
+          example: Success description
+
+    ErrorResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [failure]
+          example: failure
+        description:
+          type: string
+          description: Error message
+          example: Invalid request
+        error_code:
+          type: integer
+          description: Error code identifier
+          example: 100006
+
+    GetNodesList:
+      type: object
+      properties:
+        nodes:
+          type: array
+          items:
+            type: string
+          description: Array of node IDs (when node_details=false)
+          example:
+            - "ABCD1234EFGH5678"
+            - "WXYZ9876STUV4321"
+        node_details:
+          type: array
+          items:
+            $ref: '#/components/schemas/NodeDetail'
+          description: Detailed node information (when node_details=true)
+
+    NodeDetail:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Unique node identifier
+          example: ABCD1234EFGH5678
+        node_name:
+          type: string
+          description: User-assigned node name
+          example: ADU LIV Hub
+        type:
+          type: string
+          description: Node type/category
+          example: LIV Hub
+        config:
+          $ref: '#/components/schemas/NodeConfiguration'
+        status:
+          $ref: '#/components/schemas/NodeConnectivity'
+        params:
+          $ref: '#/components/schemas/NodeParameters'
+
+    NodeConnectivity:
+      type: object
+      properties:
+        connectivity:
+          type: object
+          properties:
+            connected:
+              type: boolean
+              description: Whether the node is currently connected to the cloud
+              example: true
+            timestamp:
+              type: integer
+              format: int64
+              description: Unix timestamp of last connectivity check
+              example: 1704067200
+
+    NodeConfiguration:
+      type: object
+      properties:
+        node_id:
+          type: string
+          description: Node identifier
+          example: ABCD1234EFGH5678
+        config_version:
+          type: string
+          description: Configuration version timestamp
+          example: "2024-01-01"
+        info:
+          type: object
+          properties:
+            fw_version:
+              type: string
+              description: Firmware version
+              example: "5.3.2"
+            model:
+              type: string
+              description: Device model identifier
+              example: thermacell-hub
+            serial_num:
+              type: string
+              description: Device serial number
+              example: TC-LIV-123456
+            platform:
+              type: string
+              description: Hardware platform
+              example: esp32
+
+    NodeParameters:
+      type: object
+      description: Thermacell LIV Hub device parameters (nested under device name)
+      properties:
+        LIV Hub:
+          type: object
+          description: LIV Hub device parameters
+          properties:
+            Name:
+              type: string
+              description: User-assigned device name
+              example: "ADU"
+            Power:
+              type: boolean
+              description: Overall device power state
+              example: true
+            Enable Repellers:
+              type: boolean
+              description: Mosquito repeller activation state
+              example: true
+            LED Power:
+              type: boolean
+              description: LED power state
+              example: true
+            LED Brightness:
+              type: integer
+              minimum: 0
+              maximum: 100
+              description: LED brightness percentage (0-100)
+              example: 80
+            LED Hue:
+              type: integer
+              minimum: 0
+              maximum: 360
+              description: LED hue in HSV color space (0-360 degrees)
+              example: 240
+            LED Saturation:
+              type: integer
+              minimum: 0
+              maximum: 100
+              description: LED saturation in HSV color space (0-100%)
+              example: 100
+            Refill Life:
+              type: number
+              format: float
+              minimum: 0
+              maximum: 100
+              description: Remaining refill cartridge life percentage
+              example: 87.5
+            System Runtime:
+              type: integer
+              minimum: 0
+              description: Current session runtime in minutes
+              example: 715
+            System Status:
+              type: integer
+              enum: [1, 2, 3]
+              description: |
+                Device operational status:
+                - 1: Off
+                - 2: Warming Up
+                - 3: Protected (operational)
+              example: 3
+            Error:
+              type: integer
+              minimum: 0
+              description: Error code (0 indicates no error)
+              example: 0
+
+    NodeParameterUpdate:
+      type: object
+      description: Parameters to update for Thermacell LIV Hub
+      properties:
+        LIV Hub:
+          type: object
+          description: Parameters to update (only include fields you want to change)
+          properties:
+            Enable Repellers:
+              type: boolean
+              description: Turn mosquito repeller on/off
+            LED Brightness:
+              type: integer
+              minimum: 0
+              maximum: 100
+              description: Set LED brightness (0=off, 1-100=brightness level)
+            LED Hue:
+              type: integer
+              minimum: 0
+              maximum: 360
+              description: Set LED hue in HSV color space
+            LED Saturation:
+              type: integer
+              minimum: 0
+              maximum: 100
+              description: Set LED saturation in HSV color space
+            Refill Reset:
+              type: integer
+              enum: [1]
+              description: Reset refill life counter to 100% (set to 1 to trigger)
+
+security:
+  - AccessToken: []

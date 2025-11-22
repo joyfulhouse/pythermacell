@@ -1,0 +1,233 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pythermacell"
+version = "0.1.0"
+description = "Python client library for Thermacell IoT devices using ESP RainMaker API"
+readme = "README.md"
+requires-python = ">=3.13"
+license = {text = "MIT"}
+authors = [
+    {name = "Bryan Li"},
+]
+keywords = ["thermacell", "iot", "esp-rainmaker", "async", "client"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Framework :: AsyncIO",
+    "Typing :: Typed",
+]
+
+dependencies = [
+    "aiohttp>=3.13.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.0.1",
+    "pytest-asyncio>=1.3.0",
+    "pytest-aiohttp>=1.0.5",
+    "pytest-cov>=7.0.0",
+    "mypy>=1.18.2",
+    "ruff>=0.14.4",
+    "python-dotenv>=1.0.0",
+    "twine>=6.0.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/joyfulhouse/pythermacell"
+Documentation = "https://github.com/joyfulhouse/pythermacell#readme"
+Repository = "https://github.com/joyfulhouse/pythermacell"
+Issues = "https://github.com/joyfulhouse/pythermacell/issues"
+
+[tool.hatchling.build.targets.wheel]
+packages = ["src/pythermacell"]
+include = ["src/pythermacell/py.typed"]
+
+[tool.pytest.ini_options]
+minversion = "9.0"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+    "-ra",
+    "--cov=pythermacell",
+    "--cov-report=term-missing:skip-covered",
+    "--cov-report=html",
+    "--cov-report=xml",
+]
+markers = [
+    "integration: marks tests as integration tests (deselect with '-m \"not integration\"')",
+    "manual: marks tests as manual tests (deselect with '-m \"not manual\"')",
+]
+filterwarnings = [
+    "error",
+    "ignore::DeprecationWarning",
+]
+
+[tool.coverage.run]
+source = ["src/pythermacell"]
+branch = true
+parallel = true
+omit = [
+    "tests/*",
+    "*/test_*.py",
+]
+
+[tool.coverage.report]
+precision = 2
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "@abstractmethod",
+]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+warn_unreachable = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_return_any = true
+strict_equality = true
+strict_concatenate = true
+disallow_subclassing_any = true
+disallow_any_generics = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+
+[[tool.mypy.overrides]]
+module = "aiohttp.*"
+ignore_missing_imports = true
+
+[tool.ruff]
+target-version = "py313"
+line-length = 120
+indent-width = 4
+
+src = ["src", "tests"]
+exclude = [
+    ".git",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".venv",
+    "__pycache__",
+    "build",
+    "dist",
+    "research",
+    "examples",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes
+    "I",      # isort
+    "N",      # pep8-naming
+    "UP",     # pyupgrade
+    "ANN",    # flake8-annotations
+    "ASYNC",  # flake8-async
+    "S",      # flake8-bandit
+    "B",      # flake8-bugbear
+    "A",      # flake8-builtins
+    "C4",     # flake8-comprehensions
+    "DTZ",    # flake8-datetimez
+    "T10",    # flake8-debugger
+    "EM",     # flake8-errmsg
+    "ISC",    # flake8-implicit-str-concat
+    "ICN",    # flake8-import-conventions
+    "G",      # flake8-logging-format
+    "PIE",    # flake8-pie
+    "T20",    # flake8-print
+    "PT",     # flake8-pytest-style
+    "Q",      # flake8-quotes
+    "RSE",    # flake8-raise
+    "RET",    # flake8-return
+    "SLF",    # flake8-self
+    "SIM",    # flake8-simplify
+    "TID",    # flake8-tidy-imports
+    "TCH",    # flake8-type-checking
+    "ARG",    # flake8-unused-arguments
+    "PTH",    # flake8-use-pathlib
+    "ERA",    # eradicate
+    "PL",     # pylint
+    "TRY",    # tryceratops
+    "FLY",    # flynt
+    "PERF",   # perflint
+    "RUF",    # ruff-specific rules
+]
+
+ignore = [
+    "ANN401",  # Dynamically typed expressions (typing.Any) are disallowed
+    "S101",    # Use of assert detected (used in tests)
+    "PLR0913", # Too many arguments to function call
+    "TRY003",  # Avoid specifying long messages outside the exception class
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = [
+    "S101",    # assert allowed in tests
+    "ARG",     # Unused function args allowed in fixtures
+    "PLR2004", # Magic value used in comparison
+    "S105",    # Possible hardcoded password
+    "S106",    # Possible hardcoded password
+    "SLF001",  # Private member access allowed in tests
+    "EM101",   # Exception string literals acceptable in tests
+    "PT011",   # Broad exception assertions acceptable in tests
+    "ERA001",  # Allow commented code in test explanations
+    "PLC0415", # Import in fixture to avoid circular imports
+]
+"src/pythermacell/resilience.py" = [
+    "TRY300",  # Return in try block is clearer than else for retry pattern
+]
+"src/pythermacell/auth.py" = [
+    "PLR0912", # authenticate() has complex retry logic requiring many branches
+    "TRY300",  # Return in try block is clearer for retry pattern
+]
+"src/pythermacell/client.py" = [
+    "SLF001",  # Private member access needed for session coordination with auth handler
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["pythermacell"]
+force-single-line = false
+lines-after-imports = 2
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+docstring-code-format = true
+docstring-code-line-length = 88
