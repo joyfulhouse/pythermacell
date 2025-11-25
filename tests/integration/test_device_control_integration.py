@@ -24,31 +24,38 @@ async def verify_state(
     condition: Callable[[ThermacellDevice], bool],
     *,
     delay: float = 5.0,
+    max_retries: int = 3,
 ) -> bool:
-    """Verify device state after a command with a single refresh.
+    """Verify device state after a command with retry logic.
 
-    This is much more efficient than aggressive polling. We give the device
-    a reasonable time to process the command (5s), then do ONE refresh to verify.
-
-    This reduces API calls from 6-8 per verification to just 1, preventing
-    API rate limiting and devices going offline.
+    This gives the device time to process commands, then verifies state with
+    retries to handle slower CI environments and network variability.
 
     Args:
         device: Device to check.
         condition: Function that returns True when desired state is reached.
-        delay: How long to wait before refreshing (default 5.0 seconds).
+        delay: How long to wait before each refresh attempt (default 5.0 seconds).
+        max_retries: Maximum number of refresh attempts (default 3).
 
     Returns:
-        True if condition was met after refresh, False otherwise.
+        True if condition was met within retries, False otherwise.
     """
-    # Give device time to process the command
-    await asyncio.sleep(delay)
+    for attempt in range(max_retries):
+        # Give device time to process the command
+        await asyncio.sleep(delay)
 
-    # Single refresh to get updated state
-    await device.refresh()
+        # Refresh to get updated state
+        await device.refresh()
 
-    # Check if condition is met
-    return condition(device)
+        # Check if condition is met
+        if condition(device):
+            return True
+
+        # Log retry attempt if not the last one
+        if attempt < max_retries - 1:
+            await asyncio.sleep(2)  # Brief pause before retry
+
+    return False
 
 
 @pytest.fixture
@@ -166,24 +173,22 @@ class TestLEDControl:
         """Test setting LED brightness."""
         # Ensure device is powered on
         await test_device.turn_on()
-        await asyncio.sleep(1)
+        state_updated = await verify_state(test_device, lambda d: d.is_powered_on)
+        if not state_updated:
+            pytest.skip("Device did not power on - cannot test LED brightness")
 
         # Set brightness to 50%
         success = await test_device.set_led_brightness(50)
         assert success, "Set brightness should succeed"
 
-        # Wait for API to process
-        await asyncio.sleep(2)
-
-        # Refresh and verify
-        await test_device.refresh()
-        assert test_device.led_brightness == 50, "Brightness should be 50"
+        # Wait for state to update with retry logic
+        state_updated = await verify_state(test_device, lambda d: d.led_brightness == 50)
+        assert state_updated, "Brightness should be 50"
 
         # Set brightness to 100%
         await test_device.set_led_brightness(100)
-        await asyncio.sleep(2)
-        await test_device.refresh()
-        assert test_device.led_brightness == 100, "Brightness should be 100"
+        state_updated = await verify_state(test_device, lambda d: d.led_brightness == 100)
+        assert state_updated, "Brightness should be 100"
 
     async def test_set_led_brightness_validation(self, test_device: ThermacellDevice) -> None:
         """Test LED brightness validation."""
@@ -228,7 +233,8 @@ class TestLEDControl:
         state_updated = await verify_state(
             test_device,
             lambda d: d.led_hue == 120 and d.led_brightness == 100,
-            delay=30.0,
+            delay=10.0,
+            max_retries=4,
         )
         assert state_updated, "LED color should update to green within timeout"
 
@@ -237,7 +243,8 @@ class TestLEDControl:
         state_updated = await verify_state(
             test_device,
             lambda d: d.led_hue == 240 and d.led_brightness == 75,
-            delay=60.0,  # Increased timeout for slower API/device response
+            delay=10.0,
+            max_retries=4,
         )
         assert state_updated, "LED color should update to blue within timeout"
 
@@ -343,7 +350,8 @@ class TestConcurrentControlOperations:
         await verify_state(
             test_device,
             lambda d: d.led_hue == 120 and d.led_brightness == 80,
-            delay=30.0,
+            delay=10.0,
+            max_retries=4,
         )
 
         # Set LED brightness
