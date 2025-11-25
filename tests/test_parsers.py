@@ -1,7 +1,5 @@
 """Tests for the parsers module."""
 
-import pytest
-
 from pythermacell.models import DeviceInfo, DeviceParams, DeviceState, DeviceStatus
 from pythermacell.parsers import (
     parse_device_info,
