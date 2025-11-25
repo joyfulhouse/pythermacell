@@ -21,6 +21,7 @@ from pythermacell.const import (
     LED_HUE_MIN,
 )
 from pythermacell.exceptions import InvalidParameterError
+from pythermacell.parsers import parse_device_state
 
 
 if TYPE_CHECKING:
@@ -488,30 +489,48 @@ class ThermacellDevice:
     # State Management
     # -------------------------------------------------------------------------
 
-    async def refresh(self) -> bool:
+    async def refresh(self, *, skip_config: bool = False) -> bool:
         """Refresh device state from API.
 
         This fetches the latest device state from the API and updates
         the internal state cache. Change listeners are notified of the update.
 
+        Args:
+            skip_config: If True, skip fetching config endpoint and reuse existing
+                device info. This reduces API calls from 3 to 2 for lightweight
+                refreshes. Config data (model, firmware, serial) rarely changes.
+
         Returns:
             True if successful, False otherwise.
         """
-        # Use the client's fetch method to get complete state
-        from http import HTTPStatus  # noqa: PLC0415 - Lazy import to avoid circular dependency
+        from http import HTTPStatus  # noqa: PLC0415 - Lazy import
 
-        # Fetch all endpoints concurrently
-        results: tuple[Any, ...] = await asyncio.gather(
-            self._api.get_node_params(self.node_id),
-            self._api.get_node_status(self.node_id),
-            self._api.get_node_config(self.node_id),
-            return_exceptions=True,
-        )
+        # Determine which endpoints to fetch
+        if skip_config:
+            # Lightweight refresh: only params and status (2 API calls)
+            results: tuple[Any, ...] = await asyncio.gather(
+                self._api.get_node_params(self.node_id),
+                self._api.get_node_status(self.node_id),
+                return_exceptions=True,
+            )
+            params_result, status_result = results
+            config_result = None
+        else:
+            # Full refresh: all three endpoints (3 API calls)
+            results = await asyncio.gather(
+                self._api.get_node_params(self.node_id),
+                self._api.get_node_status(self.node_id),
+                self._api.get_node_config(self.node_id),
+                return_exceptions=True,
+            )
+            params_result, status_result, config_result = results
 
-        params_result, status_result, config_result = results
+        # Check for exceptions in results
+        results_to_check = [params_result, status_result]
+        if config_result is not None:
+            results_to_check.append(config_result)
 
-        # Check for exceptions
-        for result in [params_result, status_result, config_result]:
+        for result in results_to_check:
             if isinstance(result, Exception):
                 _LOGGER.error("Error refreshing device %s: %s", self.node_id, result)
                 return False
@@ -519,9 +538,8 @@ class ThermacellDevice:
         # Unpack results (we know they're tuples now)
         params_status, params_data = cast("tuple[int, dict[str, Any] | None]", params_result)
         status_status, status_data = cast("tuple[int, dict[str, Any] | None]", status_result)
-        config_status, config_data = cast("tuple[int, dict[str, Any] | None]", config_result)
 
-        # Validate all requests succeeded
+        # Validate params and status requests succeeded
         if params_status != HTTPStatus.OK or params_data is None:
             _LOGGER.warning("Failed to refresh params for device %s: HTTP %d", self.node_id, params_status)
             return False
@@ -530,33 +548,18 @@ class ThermacellDevice:
             _LOGGER.warning("Failed to refresh status for device %s: HTTP %d", self.node_id, status_status)
             return False
 
-        if config_status != HTTPStatus.OK or config_data is None:
-            _LOGGER.warning("Failed to refresh config for device %s: HTTP %d", self.node_id, config_status)
-            return False
+        # Handle config data
+        if config_result is not None:
+            config_status, config_data = cast("tuple[int, dict[str, Any] | None]", config_result)
+            if config_status != HTTPStatus.OK or config_data is None:
+                _LOGGER.warning("Failed to refresh config for device %s: HTTP %d", self.node_id, config_status)
+                return False
+        else:
+            # Reuse existing config data for lightweight refresh
+            config_data = self._state.raw_data.get("config", {})
 
-        # Import parsing functions from client
-        # NOTE: This is a temporary coupling - ideally these would be in a shared module
-        from pythermacell.client import ThermacellClient  # noqa: PLC0415 - Lazy import to avoid circular dependency
-        from pythermacell.models import DeviceState  # noqa: PLC0415 - Lazy import to avoid circular dependency
-
-        # Create a temporary client instance for parsing (not ideal, but works)
-        # In a future refactor, move parsing logic to a separate module
-        temp_client = ThermacellClient.__new__(ThermacellClient)
-        device_params = temp_client._parse_device_params(params_data)  # noqa: SLF001
-        device_status = temp_client._parse_device_status(self.node_id, status_data)  # noqa: SLF001
-        device_info = temp_client._parse_device_info(self.node_id, config_data)  # noqa: SLF001
-
-        # Update state
-        new_state = DeviceState(
-            info=device_info,
-            status=device_status,
-            params=device_params,
-            raw_data={
-                "params": params_data,
-                "status": status_data,
-                "config": config_data,
-            },
-        )
+        # Use shared parsing function (no circular dependency!)
+        new_state = parse_device_state(self.node_id, params_data, status_data, config_data)
 
         await self._update_state(new_state)
         return True
@@ -649,7 +652,7 @@ class ThermacellDevice:
 
         self._auto_refresh_interval = interval
         self._auto_refresh_task = asyncio.create_task(self._auto_refresh_loop())
-        _LOGGER.info("Started auto-refresh for device %s (interval: %ds)", self.node_id, interval)
+        _LOGGER.debug("Started auto-refresh for device %s (interval: %ds)", self.node_id, interval)
 
     async def stop_auto_refresh(self) -> None:
         """Stop automatic background polling.
@@ -661,7 +664,7 @@ class ThermacellDevice:
             with contextlib.suppress(asyncio.CancelledError):
                 await self._auto_refresh_task
             self._auto_refresh_task = None
-            _LOGGER.info("Stopped auto-refresh for device %s", self.node_id)
+            _LOGGER.debug("Stopped auto-refresh for device %s", self.node_id)
 
     async def _auto_refresh_loop(self) -> None:
         """Background task that refreshes state at regular intervals.
