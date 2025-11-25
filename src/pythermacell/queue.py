@@ -99,9 +99,10 @@ class CommandQueue:
 
         # Execution state
         self._last_execute_time: datetime | None = None
-        self._lock = asyncio.Lock()
+        # Lock and event are created lazily to ensure they're bound to the correct event loop
+        self._lock: asyncio.Lock | None = None
         self._processor_task: asyncio.Task[None] | None = None
-        self._processing_event = asyncio.Event()
+        self._processing_event: asyncio.Event | None = None
         self._shutdown = False
 
     @property
@@ -139,6 +140,13 @@ class CommandQueue:
         Raises:
             asyncio.TimeoutError: If command doesn't complete within timeout.
         """
+        # Ensure processor is running (creates lock/event if needed for current event loop)
+        self._ensure_processor_running()
+
+        # Now lock and event are guaranteed to exist
+        assert self._lock is not None
+        assert self._processing_event is not None
+
         async with self._lock:
             # Check for existing command of same type to coalesce
             old_cmd_to_chain: QueuedCommand | None = None
@@ -186,9 +194,6 @@ class CommandQueue:
             self._queue[command_type] = command
             _LOGGER.debug("Queued %s command: %s", command_type, params)
 
-            # Ensure processor is running
-            self._ensure_processor_running()
-
             # Signal processor that new work is available
             self._processing_event.set()
 
@@ -202,11 +207,21 @@ class CommandQueue:
     def _ensure_processor_running(self) -> None:
         """Ensure the background processor task is running."""
         if self._processor_task is None or self._processor_task.done():
+            # Reset shutdown flag if previously shutdown (allows queue reuse)
+            self._shutdown = False
+            # Create new lock and event bound to current event loop
+            # (needed when queue is reused across different event loops in tests)
+            self._lock = asyncio.Lock()
+            self._processing_event = asyncio.Event()
             self._processor_task = asyncio.create_task(self._process_queue())
 
     async def _process_queue(self) -> None:
         """Background task that processes queued commands with rate limiting."""
         _LOGGER.debug("Command queue processor started")
+
+        # These are guaranteed to be set by _ensure_processor_running before this task starts
+        assert self._processing_event is not None
+        assert self._lock is not None
 
         try:
             while not self._shutdown:
@@ -275,6 +290,10 @@ class CommandQueue:
         This is useful for cleanup or when you need to ensure all pending
         operations complete before continuing.
         """
+        if self._lock is None:
+            # No commands have been enqueued yet, nothing to flush
+            return
+
         async with self._lock:
             commands = list(self._queue.values())
             self._queue.clear()
@@ -291,6 +310,10 @@ class CommandQueue:
         Returns:
             True if a command was cancelled, False if none was pending.
         """
+        if self._lock is None:
+            # No commands have been enqueued yet
+            return False
+
         async with self._lock:
             if command_type in self._queue:
                 command = self._queue.pop(command_type)
@@ -306,6 +329,10 @@ class CommandQueue:
         Returns:
             Number of commands cancelled.
         """
+        if self._lock is None:
+            # No commands have been enqueued yet
+            return 0
+
         async with self._lock:
             count = len(self._queue)
             for command in self._queue.values():
@@ -321,7 +348,8 @@ class CommandQueue:
         Cancels any pending commands and stops the background task.
         """
         self._shutdown = True
-        self._processing_event.set()  # Wake up processor
+        if self._processing_event is not None:
+            self._processing_event.set()  # Wake up processor
 
         await self.cancel_all()
 
