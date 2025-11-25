@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
 from pythermacell.const import (
+    DEFAULT_MIN_REQUEST_INTERVAL,
     DEVICE_TYPE_LIV_HUB,
     LED_BRIGHTNESS_MAX,
     LED_BRIGHTNESS_MIN,
@@ -22,6 +23,7 @@ from pythermacell.const import (
 )
 from pythermacell.exceptions import InvalidParameterError
 from pythermacell.parsers import parse_device_state
+from pythermacell.queue import CommandQueue
 
 
 if TYPE_CHECKING:
@@ -104,12 +106,22 @@ class ThermacellDevice:
         has_error: Whether device has an error condition.
     """
 
-    def __init__(self, api: ThermacellAPI, state: DeviceState) -> None:
+    def __init__(
+        self,
+        api: ThermacellAPI,
+        state: DeviceState,
+        *,
+        enable_queue: bool = True,
+        min_request_interval: float = DEFAULT_MIN_REQUEST_INTERVAL,
+    ) -> None:
         """Initialize the device.
 
         Args:
             api: ThermacellAPI instance for HTTP communication.
             state: Initial device state containing info, status, and parameters.
+            enable_queue: If True (default), use command queue with coalescing and rate limiting.
+                Set to False for direct API calls without queuing.
+            min_request_interval: Minimum seconds between API calls when queue is enabled.
         """
         self._api = api
         self._state = state
@@ -121,6 +133,12 @@ class ThermacellDevice:
         # Auto-refresh task
         self._auto_refresh_task: asyncio.Task[None] | None = None
         self._auto_refresh_interval: int = 60  # Default 60 seconds
+
+        # Command queue for rate limiting and coalescing
+        self._enable_queue = enable_queue
+        self._command_queue: CommandQueue | None = None
+        if enable_queue:
+            self._command_queue = CommandQueue(min_interval=min_request_interval)
 
     # -------------------------------------------------------------------------
     # Device Info Properties (from DeviceInfo)
@@ -295,9 +313,20 @@ class ThermacellDevice:
         # Notify listeners immediately (instant UI update)
         self._notify_listeners()
 
-        # Make API call in background
-        params: dict[str, dict[str, int | float | bool]] = {DEVICE_TYPE_LIV_HUB: {"Enable Repellers": power_on}}
-        success = await self._update_params(params)
+        # Define the API call
+        async def execute() -> bool:
+            params: dict[str, dict[str, int | float | bool]] = {DEVICE_TYPE_LIV_HUB: {"Enable Repellers": power_on}}
+            return await self._update_params(params)
+
+        # Execute via queue (with coalescing) or directly
+        if self._command_queue is not None:
+            success = await self._command_queue.enqueue(
+                command_type="power",
+                params={"power_on": power_on},
+                execute_fn=execute,
+            )
+        else:
+            success = await execute()
 
         # Revert on failure
         if not success:
@@ -354,9 +383,20 @@ class ThermacellDevice:
         # Notify listeners
         self._notify_listeners()
 
-        # Make API call
-        params: dict[str, dict[str, int | float | bool]] = {DEVICE_TYPE_LIV_HUB: {"LED Brightness": brightness}}
-        success = await self._update_params(params)
+        # Define the API call
+        async def execute() -> bool:
+            params: dict[str, dict[str, int | float | bool]] = {DEVICE_TYPE_LIV_HUB: {"LED Brightness": brightness}}
+            return await self._update_params(params)
+
+        # Execute via queue (with coalescing) or directly
+        if self._command_queue is not None:
+            success = await self._command_queue.enqueue(
+                command_type="led_brightness",
+                params={"brightness": brightness},
+                execute_fn=execute,
+            )
+        else:
+            success = await execute()
 
         # Revert on failure
         if not success:
@@ -409,14 +449,25 @@ class ThermacellDevice:
         # Notify listeners
         self._notify_listeners()
 
-        # Make API call (only send hue and brightness - saturation is not supported)
-        params: dict[str, dict[str, int | float | bool]] = {
-            DEVICE_TYPE_LIV_HUB: {
-                "LED Hue": hue,
-                "LED Brightness": brightness,
+        # Define the API call (only send hue and brightness - saturation is not supported)
+        async def execute() -> bool:
+            params: dict[str, dict[str, int | float | bool]] = {
+                DEVICE_TYPE_LIV_HUB: {
+                    "LED Hue": hue,
+                    "LED Brightness": brightness,
+                }
             }
-        }
-        success = await self._update_params(params)
+            return await self._update_params(params)
+
+        # Execute via queue (with coalescing) or directly
+        if self._command_queue is not None:
+            success = await self._command_queue.enqueue(
+                command_type="led_color",
+                params={"hue": hue, "brightness": brightness},
+                execute_fn=execute,
+            )
+        else:
+            success = await execute()
 
         # Revert on failure
         if not success:
@@ -665,6 +716,26 @@ class ThermacellDevice:
                 await self._auto_refresh_task
             self._auto_refresh_task = None
             _LOGGER.debug("Stopped auto-refresh for device %s", self.node_id)
+
+    async def shutdown(self) -> None:
+        """Shutdown the device and clean up resources.
+
+        This stops auto-refresh and shuts down the command queue.
+        Should be called when the device is no longer needed.
+        """
+        await self.stop_auto_refresh()
+        if self._command_queue is not None:
+            await self._command_queue.shutdown()
+            _LOGGER.debug("Shutdown complete for device %s", self.node_id)
+
+    async def flush_commands(self) -> None:
+        """Execute all pending commands immediately.
+
+        Useful for cleanup or when you need to ensure all pending
+        operations complete before continuing.
+        """
+        if self._command_queue is not None:
+            await self._command_queue.flush()
 
     async def _auto_refresh_loop(self) -> None:
         """Background task that refreshes state at regular intervals.

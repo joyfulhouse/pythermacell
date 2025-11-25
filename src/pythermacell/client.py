@@ -174,16 +174,16 @@ class ThermacellClient:
     ) -> None:
         """Exit the context manager.
 
-        Stops auto-refresh on all devices and closes the API client.
+        Shuts down all devices (stops auto-refresh and command queues) and closes the API client.
 
         Args:
             exc_type: Exception type if an exception occurred.
             exc_val: Exception value if an exception occurred.
             exc_tb: Exception traceback if an exception occurred.
         """
-        # Stop auto-refresh on all devices
+        # Shutdown all devices (stops auto-refresh and command queues)
         for device in self._devices.values():
-            await device.stop_auto_refresh()
+            await device.shutdown()
 
         # Exit API context
         await self._api.__aexit__(exc_type, exc_val, exc_tb)

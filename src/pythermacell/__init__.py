@@ -73,6 +73,7 @@ from pythermacell.parsers import (
     parse_device_state,
     parse_device_status,
 )
+from pythermacell.queue import CommandQueue, QueuedCommand
 from pythermacell.resilience import (
     CircuitBreaker,
     CircuitState,
@@ -89,6 +90,7 @@ __all__ = [
     "AuthenticationHandler",
     "CircuitBreaker",
     "CircuitState",
+    "CommandQueue",
     "DeviceError",
     "DeviceInfo",
     "DeviceParams",
@@ -100,6 +102,7 @@ __all__ = [
     "GroupNodesResponse",
     "InvalidParameterError",
     "LoginResponse",
+    "QueuedCommand",
     "RateLimitError",
     "RateLimiter",
     "ThermacellAPI",
