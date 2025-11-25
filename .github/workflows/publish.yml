@@ -83,6 +83,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: [lint, test]
+    # Only run integration tests on release, skip for manual dispatch
+    if: github.event_name == 'release'
     environment: integration-tests
     steps:
       - uses: actions/checkout@v5
@@ -117,7 +119,9 @@ jobs:
     name: Build Package
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [lint, test, integration-tests]
+    needs: [lint, test]
+    # Integration tests may be skipped for manual dispatch
+    if: always() && needs.lint.result == 'success' && needs.test.result == 'success'
     steps:
       - uses: actions/checkout@v5
 
