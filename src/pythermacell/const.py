@@ -22,3 +22,8 @@ LED_SATURATION_MAX = 100
 # JWT Token Constants
 JWT_PARTS_COUNT = 3
 BASE64_PADDING_MODULO = 4
+
+# Request Queue Configuration
+DEFAULT_MIN_REQUEST_INTERVAL = 0.5  # 500ms minimum between API calls
+DEFAULT_COMMAND_TIMEOUT = 10.0  # Max time to wait for queued command
+DEFAULT_MAX_QUEUE_SIZE = 10  # Maximum pending commands
