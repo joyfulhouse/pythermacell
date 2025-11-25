@@ -15,15 +15,15 @@ from aiohttp import ClientSession  # noqa: TC002 - Used at runtime for isinstanc
 
 from pythermacell.api import ThermacellAPI
 from pythermacell.auth import AuthenticationHandler
-from pythermacell.const import DEFAULT_BASE_URL, DEVICE_TYPE_LIV_HUB
+from pythermacell.const import DEFAULT_BASE_URL
 from pythermacell.devices import ThermacellDevice
 from pythermacell.exceptions import DeviceError
-from pythermacell.models import DeviceInfo, DeviceParams, DeviceState, DeviceStatus, Group
+from pythermacell.models import DeviceState, Group
+from pythermacell.parsers import parse_device_state
 
 
 if TYPE_CHECKING:
     from types import TracebackType
-    from typing import Any
 
     from pythermacell.resilience import CircuitBreaker, ExponentialBackoff, RateLimiter
 
@@ -314,38 +314,56 @@ class ThermacellClient:
             return_exceptions=True,
         )
 
-    async def _fetch_device_state(self, node_id: str) -> DeviceState | None:
+    async def _fetch_device_state(
+        self,
+        node_id: str,
+        *,
+        skip_config: bool = False,
+        existing_state: DeviceState | None = None,
+    ) -> DeviceState | None:
         """Fetch complete device state from API.
 
-        This method fetches three separate API endpoints to build complete device state:
+        This method fetches API endpoints to build complete device state:
         1. /user/nodes/params - Device parameters (power, LED, refill, runtime, etc.)
         2. /user/nodes/status - Connectivity status (online/offline)
-        3. /user/nodes/config - Device info (model, firmware, serial number)
+        3. /user/nodes/config - Device info (model, firmware, serial number) [optional]
 
         Args:
             node_id: The device's node ID.
+            skip_config: If True, skip fetching config endpoint and reuse existing_state's
+                info. This reduces API calls from 3 to 2 for lightweight refreshes.
+            existing_state: Required when skip_config=True. Provides the device info to reuse.
 
         Returns:
             DeviceState instance if successful, None if device not found.
         """
-        # Fetch all endpoints concurrently
-        params_result, status_result, config_result = await asyncio.gather(
-            self._api.get_node_params(node_id),
-            self._api.get_node_status(node_id),
-            self._api.get_node_config(node_id),
-            return_exceptions=False,
-        )
+        # Build list of coroutines to fetch
+        if skip_config and existing_state is not None:
+            # Lightweight refresh: only params and status (2 API calls)
+            params_result, status_result = await asyncio.gather(
+                self._api.get_node_params(node_id),
+                self._api.get_node_status(node_id),
+                return_exceptions=False,
+            )
+            config_result = None
+        else:
+            # Full fetch: all three endpoints (3 API calls)
+            params_result, status_result, config_result = await asyncio.gather(
+                self._api.get_node_params(node_id),
+                self._api.get_node_status(node_id),
+                self._api.get_node_config(node_id),
+                return_exceptions=False,
+            )
 
         params_status, params_data = params_result
         status_status, status_data = status_result
-        config_status, config_data = config_result
 
         # Check for 404 Not Found
         if params_status == HTTPStatus.NOT_FOUND:
             _LOGGER.debug("Device %s not found", node_id)
             return None
 
-        # Validate all requests succeeded
+        # Validate params and status requests succeeded
         if params_status != HTTPStatus.OK or params_data is None:
             _LOGGER.warning("Failed to fetch params for device %s: HTTP %d", node_id, params_status)
             return None
@@ -354,110 +372,21 @@ class ThermacellClient:
             _LOGGER.warning("Failed to fetch status for device %s: HTTP %d", node_id, status_status)
             return None
 
-        if config_status != HTTPStatus.OK or config_data is None:
-            _LOGGER.warning("Failed to fetch config for device %s: HTTP %d", node_id, config_status)
+        # Handle config data
+        if config_result is not None:
+            config_status, config_data = config_result
+            if config_status != HTTPStatus.OK or config_data is None:
+                _LOGGER.warning("Failed to fetch config for device %s: HTTP %d", node_id, config_status)
+                return None
+        elif existing_state is not None:
+            # Reuse existing config data for lightweight refresh
+            config_data = existing_state.raw_data.get("config", {})
+        else:
+            _LOGGER.warning("Cannot skip config without existing state for device %s", node_id)
             return None
 
-        # Parse responses into models
-        device_params = self._parse_device_params(params_data)
-        device_status = self._parse_device_status(node_id, status_data)
-        device_info = self._parse_device_info(node_id, config_data)
-
-        return DeviceState(
-            info=device_info,
-            status=device_status,
-            params=device_params,
-            raw_data={
-                "params": params_data,
-                "status": status_data,
-                "config": config_data,
-            },
-        )
-
-    def _parse_device_params(self, data: dict[str, Any]) -> DeviceParams:
-        """Parse device parameters from API response.
-
-        The Thermacell API has two power-related fields:
-        - "Power": Read-only status indicator (not used for control)
-        - "Enable Repellers": Writable control parameter (actual device power)
-
-        LED state logic: The LED is only considered "on" when BOTH conditions are met:
-        1. Device is powered on (enable_repellers=True)
-        2. LED brightness is greater than 0
-
-        This matches the physical device behavior where the LED cannot be on
-        when the device itself is off, even if brightness is set to a non-zero value.
-
-        Args:
-            data: Raw parameter data from API in format:
-                  {"LIV Hub": {"Power": bool, "LED Brightness": int, ...}}
-
-        Returns:
-            DeviceParams instance with parsed and calculated state.
-        """
-        hub_params = data.get(DEVICE_TYPE_LIV_HUB, {})
-
-        # Use "Enable Repellers" for device power (not "Power" which is read-only)
-        enable_repellers = hub_params.get("Enable Repellers")
-        brightness = hub_params.get("LED Brightness", 0)
-
-        # Calculate LED power state: only "on" when hub powered AND brightness > 0
-        # This matches physical device behavior and prevents confusion
-        led_power = enable_repellers and brightness > 0 if enable_repellers is not None else None
-
-        return DeviceParams(
-            power=enable_repellers,  # Use enable_repellers for power status
-            led_power=led_power,  # Calculated from enable_repellers and brightness
-            led_brightness=brightness,
-            led_hue=hub_params.get("LED Hue"),
-            led_saturation=hub_params.get("LED Saturation"),
-            refill_life=hub_params.get("Refill Life"),
-            system_runtime=hub_params.get("System Runtime"),
-            system_status=hub_params.get("System Status"),
-            error=hub_params.get("Error"),
-            enable_repellers=enable_repellers,
-        )
-
-    def _parse_device_status(self, node_id: str, data: dict[str, Any]) -> DeviceStatus:
-        """Parse device status from API response.
-
-        Args:
-            node_id: Device node ID.
-            data: Raw status data from API.
-
-        Returns:
-            DeviceStatus instance.
-        """
-        connectivity = data.get("connectivity", {})
-        connected = connectivity.get("connected", False)
-
-        return DeviceStatus(node_id=node_id, connected=connected)
-
-    def _parse_device_info(self, node_id: str, data: dict[str, Any]) -> DeviceInfo:
-        """Parse device info from API response.
-
-        Args:
-            node_id: Device node ID.
-            data: Raw config data from API.
-
-        Returns:
-            DeviceInfo instance.
-        """
-        info = data.get("info", {})
-        devices = data.get("devices", [{}])
-        device_data = devices[0] if devices else {}
-
-        # Convert model name to user-friendly format
-        model_type = info.get("type", "")
-        model = "Thermacell LIV Hub" if model_type == "thermacell-hub" else model_type
-
-        return DeviceInfo(
-            node_id=node_id,
-            name=info.get("name", node_id),
-            model=model,
-            firmware_version=info.get("fw_version", "unknown"),
-            serial_number=device_data.get("serial_num", "unknown"),
-        )
+        # Use shared parsing function
+        return parse_device_state(node_id, params_data, status_data, config_data)
 
     # -------------------------------------------------------------------------
     # Group Management
@@ -636,6 +565,10 @@ class ThermacellClient:
     ) -> bool:
         """Update an existing group.
 
+        This method is optimized to minimize API calls:
+        - If group_name is provided, no extra fetch is needed
+        - Only fetches current group info when group_name is None (to preserve existing name)
+
         Args:
             group_id: The group's unique identifier.
             group_name: Optional new name for the group.
@@ -653,14 +586,17 @@ class ThermacellClient:
             msg = "Must provide either group_name or node_ids to update"
             raise ValueError(msg)
 
-        # Get current group info to preserve unmodified fields
-        current_group = await self.get_group(group_id)
-        if not current_group:
-            _LOGGER.warning("Group %s not found", group_id)
-            return False
-
-        # Use current name if not updating
-        final_name = group_name.strip() if group_name else current_group.group_name
+        # Only fetch current group info if we need to preserve the existing name
+        if group_name:
+            # Name provided explicitly - no extra API call needed
+            final_name = group_name.strip()
+        else:
+            # Need to fetch current name to preserve it (1 API call)
+            current_group = await self.get_group(group_id)
+            if not current_group:
+                _LOGGER.warning("Group %s not found", group_id)
+                return False
+            final_name = current_group.group_name
 
         _LOGGER.debug("Updating group %s", group_id)
 

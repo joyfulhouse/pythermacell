@@ -16,6 +16,9 @@ from aiohttp import ClientError, ClientSession, ClientTimeout
 from pythermacell.const import DEFAULT_BASE_URL, DEFAULT_TIMEOUT
 
 
+# Maximum number of rate-limit retries to prevent infinite recursion
+MAX_RATE_LIMIT_RETRIES = 3
+
 if TYPE_CHECKING:
     from types import TracebackType
 
@@ -157,6 +160,7 @@ class ThermacellAPI:
         json_data: dict[str, Any] | None = None,
         params: dict[str, str] | None = None,
         retry_auth: bool = True,
+        _rate_limit_retries: int = 0,
     ) -> tuple[int, dict[str, Any] | None]:
         """Make an authenticated API request.
 
@@ -172,6 +176,7 @@ class ThermacellAPI:
             json_data: Optional JSON data for request body.
             params: Optional query parameters.
             retry_auth: Whether to retry with reauthentication on 401/403.
+            _rate_limit_retries: Internal counter for rate-limit retries (do not set manually).
 
         Returns:
             Tuple of (status_code, response_data). Response data is None if
@@ -206,20 +211,34 @@ class ThermacellAPI:
                 headers=headers,
                 timeout=timeout,
             ) as response:
-                # Handle rate limiting
+                # Handle rate limiting with bounded retries
                 if response.status == HTTPStatus.TOO_MANY_REQUESTS and self._rate_limiter is not None:
+                    if _rate_limit_retries >= MAX_RATE_LIMIT_RETRIES:
+                        _LOGGER.error(
+                            "Rate limit retry exhausted after %d attempts for %s",
+                            MAX_RATE_LIMIT_RETRIES,
+                            endpoint,
+                        )
+                        return response.status, None
+
                     retry_after = response.headers.get("Retry-After")
                     delay = self._rate_limiter.get_retry_delay(response.status, retry_after)
-                    _LOGGER.warning("Rate limited (429), waiting %.2fs before retry", delay)
+                    _LOGGER.warning(
+                        "Rate limited (429), waiting %.2fs before retry (attempt %d/%d)",
+                        delay,
+                        _rate_limit_retries + 1,
+                        MAX_RATE_LIMIT_RETRIES,
+                    )
                     await asyncio.sleep(delay)
 
-                    # Retry request after rate limit delay
+                    # Retry request after rate limit delay with incremented counter
                     return await self.request(
                         method,
                         endpoint,
                         json_data=json_data,
                         params=params,
                         retry_auth=retry_auth,
+                        _rate_limit_retries=_rate_limit_retries + 1,
                     )
 
                 # Handle authentication errors

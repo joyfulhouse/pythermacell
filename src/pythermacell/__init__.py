@@ -67,6 +67,12 @@ from pythermacell.models import (
     GroupNodesResponse,
     LoginResponse,
 )
+from pythermacell.parsers import (
+    parse_device_info,
+    parse_device_params,
+    parse_device_state,
+    parse_device_status,
+)
 from pythermacell.resilience import (
     CircuitBreaker,
     CircuitState,
@@ -103,5 +109,9 @@ __all__ = [
     "ThermacellError",
     "ThermacellTimeoutError",
     "__version__",
+    "parse_device_info",
+    "parse_device_params",
+    "parse_device_state",
+    "parse_device_status",
     "retry_with_backoff",
 ]

@@ -167,6 +167,20 @@ class AuthenticationHandler:
         """
         return self.access_token is not None and self.user_id is not None
 
+    def _validate_session(self) -> None:
+        """Validate that the session is initialized and open.
+
+        Raises:
+            RuntimeError: If session is not initialized or is closed.
+        """
+        if self._session is None:
+            msg = "Session not initialized. Use 'async with' or provide a session."
+            raise RuntimeError(msg)
+
+        if self._session.closed:
+            msg = "Session is closed. Cannot make requests."
+            raise RuntimeError(msg)
+
     def _decode_jwt_payload(self, jwt_token: str) -> dict[str, Any]:
         """Decode JWT token payload without verification.
 
@@ -230,13 +244,7 @@ class AuthenticationHandler:
             ConnectionError: If a connection error occurs.
             RuntimeError: If circuit breaker is open.
         """
-        if self._session is None:
-            msg = "Session not initialized. Use 'async with' or provide a session."
-            raise RuntimeError(msg)
-
-        if self._session.closed:
-            msg = "Session is closed. Cannot authenticate."
-            raise RuntimeError(msg)
+        self._validate_session()
 
         # Skip authentication if not forced and we have valid tokens
         if not force and self.is_authenticated() and not self.needs_reauthentication():
@@ -323,9 +331,10 @@ class AuthenticationHandler:
 
             _LOGGER.debug("Authenticating with %s", url)
 
-            if self._session is None:
-                msg = "Session not initialized"
-                raise RuntimeError(msg)
+            # Session should be validated by authenticate(), but double-check
+            self._validate_session()
+            # We know _session is not None after validation
+            assert self._session is not None
 
             async with self._session.post(url, json=data, timeout=timeout) as response:
                 # Handle rate limiting
