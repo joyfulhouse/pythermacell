@@ -170,18 +170,25 @@ def pytest_configure(config: pytest.Config) -> None:
 async def rate_limit_delay(request: pytest.FixtureRequest) -> None:
     """Add delay between integration tests to prevent API rate limiting.
 
-    This fixture automatically runs after each integration test to add a small
+    This fixture automatically runs after each integration test to add a
     delay, preventing the API from being overwhelmed when running the full test suite.
 
     The delay helps avoid:
     - API rate limiting (429 responses)
     - Device firmware overload
     - Devices going offline due to too many rapid commands
+
+    Delay times:
+    - slow tests: 10 seconds (control operations that stress the device)
+    - regular integration tests: 5 seconds
     """
     # Only apply to integration tests
     if "integration" in request.keywords:
         yield
-        # Add 2-second delay after each integration test
-        await asyncio.sleep(2.0)
+        # Slow tests (control operations) need longer delays
+        if "slow" in request.keywords:
+            await asyncio.sleep(10.0)
+        else:
+            await asyncio.sleep(5.0)
     else:
         yield

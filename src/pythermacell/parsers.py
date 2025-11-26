@@ -81,27 +81,46 @@ def parse_device_status(node_id: str, data: dict[str, Any]) -> DeviceStatus:
     return DeviceStatus(node_id=node_id, connected=connected)
 
 
-def parse_device_info(node_id: str, data: dict[str, Any]) -> DeviceInfo:
+def parse_device_info(
+    node_id: str,
+    config_data: dict[str, Any],
+    params_data: dict[str, Any] | None = None,
+) -> DeviceInfo:
     """Parse device info from API response.
+
+    User-friendly device names (e.g., "Pool", "ADU") are stored in the params
+    endpoint under "LIV Hub" -> "Name", not in the config endpoint. The config
+    endpoint's info.name contains the generic device type (e.g., "Thermacell LIV Hub").
 
     Args:
         node_id: Device node ID.
-        data: Raw config data from API.
+        config_data: Raw config data from /user/nodes/config endpoint.
+        params_data: Raw params data from /user/nodes/params endpoint (optional).
+            If provided, the user-friendly name will be extracted from here.
 
     Returns:
-        DeviceInfo instance.
+        DeviceInfo instance with user-friendly name if available.
     """
-    info = data.get("info", {})
-    devices = data.get("devices", [{}])
+    info = config_data.get("info", {})
+    devices = config_data.get("devices", [{}])
     device_data = devices[0] if devices else {}
 
     # Convert model name to user-friendly format
     model_type = info.get("type", "")
     model = "Thermacell LIV Hub" if model_type == "thermacell-hub" else model_type
 
+    # User-friendly device name comes from params["LIV Hub"]["Name"]
+    # Fall back to config info.name, then node_id
+    name = node_id  # Default fallback
+    if params_data:
+        hub_params = params_data.get(DEVICE_TYPE_LIV_HUB, {})
+        name = hub_params.get("Name") or info.get("name") or node_id
+    else:
+        name = info.get("name") or node_id
+
     return DeviceInfo(
         node_id=node_id,
-        name=info.get("name", node_id),
+        name=name,
         model=model,
         firmware_version=info.get("fw_version", "unknown"),
         serial_number=device_data.get("serial_num", "unknown"),
@@ -117,7 +136,8 @@ def parse_device_state(
     """Parse complete device state from multiple API responses.
 
     This is a convenience function that combines all three parsing functions
-    into a single DeviceState object.
+    into a single DeviceState object. The params_data is passed to parse_device_info
+    to extract the user-friendly device name from "LIV Hub" -> "Name".
 
     Args:
         node_id: Device node ID.
@@ -129,7 +149,7 @@ def parse_device_state(
         DeviceState instance with all parsed data.
     """
     return DeviceState(
-        info=parse_device_info(node_id, config_data),
+        info=parse_device_info(node_id, config_data, params_data),
         status=parse_device_status(node_id, status_data),
         params=parse_device_params(params_data),
         raw_data={
