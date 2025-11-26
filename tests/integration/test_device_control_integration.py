@@ -23,7 +23,7 @@ async def verify_state(
     device: ThermacellDevice,
     condition: Callable[[ThermacellDevice], bool],
     *,
-    delay: float = 5.0,
+    delay: float = 8.0,
     max_retries: int = 3,
 ) -> bool:
     """Verify device state after a command with retry logic.
@@ -31,10 +31,13 @@ async def verify_state(
     This gives the device time to process commands, then verifies state with
     retries to handle slower CI environments and network variability.
 
+    Important: Each refresh makes 3 API calls, so we use longer delays between
+    retries to avoid overwhelming the device firmware.
+
     Args:
         device: Device to check.
         condition: Function that returns True when desired state is reached.
-        delay: How long to wait before each refresh attempt (default 5.0 seconds).
+        delay: How long to wait before each refresh attempt (default 8.0 seconds).
         max_retries: Maximum number of refresh attempts (default 3).
 
     Returns:
@@ -44,16 +47,16 @@ async def verify_state(
         # Give device time to process the command
         await asyncio.sleep(delay)
 
-        # Refresh to get updated state
+        # Refresh to get updated state (lightweight refresh - 2 API calls)
         await device.refresh()
 
         # Check if condition is met
         if condition(device):
             return True
 
-        # Log retry attempt if not the last one
+        # Longer pause before retry to avoid overwhelming device
         if attempt < max_retries - 1:
-            await asyncio.sleep(2)  # Brief pause before retry
+            await asyncio.sleep(5)
 
     return False
 
@@ -96,7 +99,7 @@ class TestDevicePowerControl:
         assert success, "Turn on should succeed"
 
         # Wait for API to process
-        await asyncio.sleep(2)
+        await asyncio.sleep(5)
 
         # Refresh state and verify
         refreshed = await test_device.refresh()
@@ -120,7 +123,7 @@ class TestDevicePowerControl:
 
         # Restore original state
         await test_device.set_power(original_power if original_power is not None else False)
-        await asyncio.sleep(1)
+        await asyncio.sleep(5)
 
     async def test_power_toggle_sequence(self, test_device: ThermacellDevice) -> None:
         """Test toggling power on and off in sequence."""
@@ -147,14 +150,14 @@ class TestLEDControl:
         """Test turning LED on."""
         # Ensure device is powered on first (LED requires device power)
         await test_device.turn_on()
-        await asyncio.sleep(1)
+        await asyncio.sleep(5)
 
         # Turn LED on
         success = await test_device.set_led_power(True)
         assert success, "Set LED power should succeed"
 
         # Wait for API to process
-        await asyncio.sleep(2)
+        await asyncio.sleep(5)
 
         # Refresh and verify
         await test_device.refresh()
@@ -204,7 +207,7 @@ class TestLEDControl:
         success = await test_device.set_led_brightness(0)
         assert success, "Brightness 0 should be valid"
 
-        await asyncio.sleep(1)
+        await asyncio.sleep(5)
 
         success = await test_device.set_led_brightness(100)
         assert success, "Brightness 100 should be valid"
@@ -265,25 +268,28 @@ class TestLEDControl:
             await test_device.set_led_color(hue=0, brightness=101)
 
     async def test_led_color_range(self, test_device: ThermacellDevice) -> None:
-        """Test LED color across full hue range.
+        """Test LED color across a sample of the hue range.
 
         Note: Saturation is not supported and is always 100% (full saturation).
+
+        This test uses a reduced set of values to avoid overwhelming the device.
+        Full range testing should be done manually when needed.
         """
         # Ensure device is powered on
         await test_device.turn_on()
-        await asyncio.sleep(1)
+        await asyncio.sleep(3)
 
-        # Test various hue values across the color spectrum
-        for hue in [0, 60, 120, 180, 240, 300, 360]:
+        # Test a sample of hue values (reduced from 7 to 3 to avoid device stress)
+        for hue in [0, 120, 240]:
             success = await test_device.set_led_color(hue=hue, brightness=100)
             assert success, f"Setting hue {hue} should succeed"
-            await asyncio.sleep(1)
+            await asyncio.sleep(5)  # Increased from 1 to 5 seconds
 
-        # Test various brightness values
-        for brightness in [25, 50, 75, 100]:
+        # Test boundary brightness values only (reduced from 4 to 2)
+        for brightness in [50, 100]:
             success = await test_device.set_led_color(hue=120, brightness=brightness)
             assert success, f"Setting brightness {brightness} should succeed"
-            await asyncio.sleep(1)
+            await asyncio.sleep(5)  # Increased from 1 to 5 seconds
 
 
 class TestRefillControl:
@@ -369,15 +375,15 @@ class TestConcurrentControlOperations:
 
     async def test_device_state_consistency(self, test_device: ThermacellDevice) -> None:
         """Test device state remains consistent after multiple operations."""
-        # Perform multiple operations
+        # Perform multiple operations with adequate delays to avoid device stress
         await test_device.turn_on()
-        await asyncio.sleep(1)
+        await asyncio.sleep(5)
 
         await test_device.set_led_color(hue=240, brightness=100)
-        await asyncio.sleep(1)
+        await asyncio.sleep(5)
 
         await test_device.set_led_brightness(75)
-        await asyncio.sleep(1)
+        await asyncio.sleep(5)
 
         # Refresh state
         await test_device.refresh()

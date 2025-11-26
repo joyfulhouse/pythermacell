@@ -216,6 +216,74 @@ class TestParseDeviceInfo:
 
         assert info.serial_number == "unknown"
 
+    def test_parse_name_from_params(self) -> None:
+        """Test that user-friendly name comes from params, not config.
+
+        User-assigned names like "Pool" or "ADU" are stored in the params
+        endpoint under "LIV Hub" -> "Name", while config only has the generic
+        device type name "Thermacell LIV Hub".
+        """
+        config_data = {
+            "info": {
+                "name": "Thermacell LIV Hub",  # Generic device type name
+                "type": "thermacell-hub",
+                "fw_version": "1.0.0",
+            },
+            "devices": [{"serial_num": "ABC123"}],
+        }
+        params_data = {
+            "LIV Hub": {
+                "Name": "Pool",  # User-friendly name
+                "Enable Repellers": True,
+            }
+        }
+
+        info = parse_device_info("node123", config_data, params_data)
+
+        assert info.name == "Pool"  # Should use params name, not config name
+        assert info.node_id == "node123"
+        assert info.model == "Thermacell LIV Hub"
+
+    def test_parse_name_fallback_to_config_when_no_params_name(self) -> None:
+        """Test fallback to config name when params has no Name field."""
+        config_data = {
+            "info": {
+                "name": "My Custom Hub",
+                "type": "thermacell-hub",
+                "fw_version": "1.0.0",
+            },
+            "devices": [{"serial_num": "ABC123"}],
+        }
+        params_data = {
+            "LIV Hub": {
+                "Enable Repellers": True,
+                # No "Name" field
+            }
+        }
+
+        info = parse_device_info("node456", config_data, params_data)
+
+        assert info.name == "My Custom Hub"  # Falls back to config name
+
+    def test_parse_name_fallback_to_node_id(self) -> None:
+        """Test fallback to node_id when neither params nor config has name."""
+        config_data = {
+            "info": {
+                "type": "thermacell-hub",
+                "fw_version": "1.0.0",
+            },
+            "devices": [{"serial_num": "ABC123"}],
+        }
+        params_data = {
+            "LIV Hub": {
+                "Enable Repellers": True,
+            }
+        }
+
+        info = parse_device_info("node789", config_data, params_data)
+
+        assert info.name == "node789"  # Falls back to node_id
+
 
 class TestParseDeviceState:
     """Tests for parse_device_state function."""
@@ -224,6 +292,7 @@ class TestParseDeviceState:
         """Test parsing complete device state from all endpoints."""
         params_data = {
             "LIV Hub": {
+                "Name": "Backyard",  # User-friendly name from params
                 "Enable Repellers": True,
                 "LED Brightness": 100,
             }
@@ -231,7 +300,7 @@ class TestParseDeviceState:
         status_data = {"connectivity": {"connected": True}}
         config_data = {
             "info": {
-                "name": "Backyard Hub",
+                "name": "Thermacell LIV Hub",  # Generic name from config
                 "type": "thermacell-hub",
                 "fw_version": "1.0.0",
             },
@@ -242,7 +311,7 @@ class TestParseDeviceState:
 
         assert isinstance(state, DeviceState)
         assert state.info.node_id == "node_abc"
-        assert state.info.name == "Backyard Hub"
+        assert state.info.name == "Backyard"  # Uses params Name, not config name
         assert state.status.connected is True
         assert state.params.enable_repellers is True
         assert state.params.led_brightness == 100
