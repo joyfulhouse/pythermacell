@@ -118,7 +118,7 @@ paths:
                     description: 'Login successful'
                     idtoken: '<JWT_ID_TOKEN: Contains user metadata including custom:user_id>'
                     accesstoken: '<JWT_ACCESS_TOKEN: Use in Authorization header for API calls>'
-                    refreshtoken: 'refresh_token_value'
+                    refreshtoken: '<REFRESH_TOKEN: Use to extend session without re-authentication>'
                 extendSession:
                   summary: Session extended successfully
                   value:
@@ -620,7 +620,7 @@ components:
         JWT access token obtained from `/v1/login2` endpoint.
         Include the token in the Authorization header without "Bearer" prefix.
 
-        Example: `Authorization: <JWT_ACCESS_TOKEN: Use in Authorization header for API calls>`
+        Example: `Authorization: <your_access_token_from_login2_response>`
 
   parameters:
     ApiVersion:
