@@ -9,8 +9,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from collections.abc import Callable  # noqa: TC003 - Used at runtime for type hints
 from datetime import UTC, datetime
+from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, cast
 
 from pythermacell.const import (
@@ -27,6 +27,8 @@ from pythermacell.queue import CommandQueue
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from pythermacell.api import ThermacellAPI
     from pythermacell.models import DeviceState
 
@@ -524,8 +526,6 @@ class ThermacellDevice:
         Returns:
             True if successful, False otherwise.
         """
-        from http import HTTPStatus  # noqa: PLC0415 - Lazy import to avoid circular dependency
-
         status, _ = await self._api.update_node_params(self.node_id, cast("dict[str, Any]", params))
         success = status in (HTTPStatus.OK, HTTPStatus.NO_CONTENT)
 
@@ -554,8 +554,6 @@ class ThermacellDevice:
         Returns:
             True if successful, False otherwise.
         """
-        from http import HTTPStatus  # noqa: PLC0415 - Lazy import
-
         # Determine which endpoints to fetch
         if skip_config:
             # Lightweight refresh: only params and status (2 API calls)

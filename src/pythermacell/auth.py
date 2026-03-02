@@ -167,8 +167,11 @@ class AuthenticationHandler:
         """
         return self.access_token is not None and self.user_id is not None
 
-    def _validate_session(self) -> None:
-        """Validate that the session is initialized and open.
+    def _validate_session(self) -> ClientSession:
+        """Validate that the session is initialized and open, then return it.
+
+        Returns:
+            The validated ClientSession (narrows type from ClientSession | None).
 
         Raises:
             RuntimeError: If session is not initialized or is closed.
@@ -180,6 +183,8 @@ class AuthenticationHandler:
         if self._session.closed:
             msg = "Session is closed. Cannot make requests."
             raise RuntimeError(msg)
+
+        return self._session
 
     def _decode_jwt_payload(self, jwt_token: str) -> dict[str, Any]:
         """Decode JWT token payload without verification.
@@ -246,8 +251,9 @@ class AuthenticationHandler:
         """
         self._validate_session()
 
-        # Skip authentication if not forced and we have valid tokens
-        if not force and self.is_authenticated() and not self.needs_reauthentication():
+        # Skip authentication if not forced and tokens are still valid.
+        # needs_reauthentication() already handles the is_authenticated() check internally.
+        if not force and not self.needs_reauthentication():
             _LOGGER.debug("Skipping authentication - valid tokens already exist")
             return True
 
@@ -331,12 +337,9 @@ class AuthenticationHandler:
 
             _LOGGER.debug("Authenticating with %s", url)
 
-            # Session should be validated by authenticate(), but double-check
-            self._validate_session()
-            # We know _session is not None after validation
-            assert self._session is not None
+            session = self._validate_session()
 
-            async with self._session.post(url, json=data, timeout=timeout) as response:
+            async with session.post(url, json=data, timeout=timeout) as response:
                 # Handle rate limiting
                 if response.status == HTTPStatus.TOO_MANY_REQUESTS and self._rate_limiter is not None:
                     retry_after = response.headers.get("Retry-After")

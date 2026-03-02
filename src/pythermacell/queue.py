@@ -43,7 +43,7 @@ class QueuedCommand:
     command_type: str
     params: dict[str, Any]
     execute_fn: Callable[[], Awaitable[bool]]
-    future: asyncio.Future[bool] = field(default_factory=lambda: asyncio.get_event_loop().create_future())
+    future: asyncio.Future[bool]
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
@@ -143,9 +143,10 @@ class CommandQueue:
         # Ensure processor is running (creates lock/event if needed for current event loop)
         self._ensure_processor_running()
 
-        # Now lock and event are guaranteed to exist
-        assert self._lock is not None
-        assert self._processing_event is not None
+        # Now lock and event are guaranteed to exist (created by _ensure_processor_running)
+        if self._lock is None or self._processing_event is None:
+            msg = "Queue processor failed to initialize"
+            raise RuntimeError(msg)
 
         async with self._lock:
             # Check for existing command of same type to coalesce
@@ -220,8 +221,9 @@ class CommandQueue:
         _LOGGER.debug("Command queue processor started")
 
         # These are guaranteed to be set by _ensure_processor_running before this task starts
-        assert self._processing_event is not None
-        assert self._lock is not None
+        if self._processing_event is None or self._lock is None:
+            msg = "Queue processor started without initialization"
+            raise RuntimeError(msg)
 
         try:
             while not self._shutdown:

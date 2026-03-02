@@ -187,7 +187,6 @@ select = [
 
 ignore = [
     "ANN401",  # Dynamically typed expressions (typing.Any) are disallowed
-    "S101",    # Use of assert detected (used in tests)
     "PLR0913", # Too many arguments to function call
     "TRY003",  # Avoid specifying long messages outside the exception class
 ]
@@ -207,6 +206,7 @@ ignore = [
 ]
 "src/pythermacell/resilience.py" = [
     "TRY300",  # Return in try block is clearer than else for retry pattern
+    "S311",    # random.uniform() is intentional for backoff jitter (not security-sensitive)
 ]
 "src/pythermacell/auth.py" = [
     "PLR0912", # authenticate() has complex retry logic requiring many branches

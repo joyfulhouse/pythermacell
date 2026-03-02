@@ -297,7 +297,7 @@ class ExponentialBackoff:
 
         # Add jitter if enabled: random value between 0 and delay
         if self.config.jitter:
-            delay = random.uniform(0, delay)  # noqa: S311
+            delay = random.uniform(0, delay)
 
         return delay
 

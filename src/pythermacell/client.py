@@ -11,8 +11,6 @@ import logging
 from http import HTTPStatus
 from typing import TYPE_CHECKING
 
-from aiohttp import ClientSession  # noqa: TC002 - Used at runtime for isinstance checks
-
 from pythermacell.api import ThermacellAPI
 from pythermacell.auth import AuthenticationHandler
 from pythermacell.const import DEFAULT_BASE_URL
@@ -24,6 +22,8 @@ from pythermacell.parsers import parse_device_state
 
 if TYPE_CHECKING:
     from types import TracebackType
+
+    from aiohttp import ClientSession
 
     from pythermacell.resilience import CircuitBreaker, ExponentialBackoff, RateLimiter
 
@@ -215,7 +215,6 @@ class ThermacellClient:
         # Fetch full state for all devices concurrently
         states = await asyncio.gather(
             *[self._fetch_device_state(node_id) for node_id in node_ids],
-            return_exceptions=False,
         )
 
         # Create or update device objects
@@ -343,7 +342,6 @@ class ThermacellClient:
             params_result, status_result = await asyncio.gather(
                 self._api.get_node_params(node_id),
                 self._api.get_node_status(node_id),
-                return_exceptions=False,
             )
             config_result = None
         else:
@@ -352,7 +350,6 @@ class ThermacellClient:
                 self._api.get_node_params(node_id),
                 self._api.get_node_status(node_id),
                 self._api.get_node_config(node_id),
-                return_exceptions=False,
             )
 
         params_status, params_data = params_result
@@ -511,7 +508,6 @@ class ThermacellClient:
         # Fetch only devices in this group concurrently (3 API calls per device)
         devices = await asyncio.gather(
             *[self.get_device(node_id, force_refresh=False) for node_id in node_ids],
-            return_exceptions=False,
         )
 
         # Filter out any None results (devices that no longer exist)
