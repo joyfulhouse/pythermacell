@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pythermacell.const import DEVICE_TYPE_LIV_HUB
+from pythermacell.const import DEVICE_TYPE_LIV_HUB, SYSTEM_RUNTIME_MULTIPLIER
 from pythermacell.models import DeviceInfo, DeviceParams, DeviceState, DeviceStatus
 
 
@@ -58,7 +58,7 @@ def parse_device_params(data: dict[str, Any]) -> DeviceParams:
         led_hue=hub_params.get("LED Hue"),
         led_saturation=hub_params.get("LED Saturation"),
         refill_life=hub_params.get("Refill Life"),
-        system_runtime=hub_params.get("System Runtime"),
+        system_runtime=(hub_params.get("System Runtime") or 0) * SYSTEM_RUNTIME_MULTIPLIER,
         system_status=hub_params.get("System Status"),
         error=hub_params.get("Error"),
         enable_repellers=enable_repellers,

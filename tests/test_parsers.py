@@ -36,7 +36,7 @@ class TestParseDeviceParams:
         assert params.led_hue == 120
         assert params.led_saturation == 100
         assert params.refill_life == 85.5
-        assert params.system_runtime == 30
+        assert params.system_runtime == 30 * 6  # API value * SYSTEM_RUNTIME_MULTIPLIER
         assert params.system_status == 3
         assert params.error == 0
 
@@ -90,6 +90,47 @@ class TestParseDeviceParams:
         params = parse_device_params(data)
 
         assert params.led_power is None
+
+    def test_system_runtime_converted_from_tenths_of_hours_to_minutes(self) -> None:
+        """Test that System Runtime is converted from API units (tenths of hours) to minutes.
+
+        The API returns System Runtime in tenths of an hour (6-minute intervals).
+        A raw value of 285 means 285 * 6 = 1710 minutes = 1 day, 4 hours, 30 minutes.
+        """
+        data = {
+            "LIV Hub": {
+                "System Runtime": 285,
+                "Enable Repellers": True,
+            }
+        }
+
+        params = parse_device_params(data)
+
+        assert params.system_runtime == 1710  # 285 * 6 = 1710 minutes
+
+    def test_system_runtime_zero(self) -> None:
+        """Test that zero System Runtime stays zero after conversion."""
+        data = {
+            "LIV Hub": {
+                "System Runtime": 0,
+            }
+        }
+
+        params = parse_device_params(data)
+
+        assert params.system_runtime == 0
+
+    def test_system_runtime_missing_defaults_to_zero(self) -> None:
+        """Test that missing System Runtime defaults to 0."""
+        data = {
+            "LIV Hub": {
+                "Enable Repellers": True,
+            }
+        }
+
+        params = parse_device_params(data)
+
+        assert params.system_runtime == 0
 
     def test_parse_empty_hub_params(self) -> None:
         """Test parsing with empty LIV Hub section."""
