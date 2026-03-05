@@ -120,8 +120,8 @@ class TestParseDeviceParams:
 
         assert params.system_runtime == 0
 
-    def test_system_runtime_missing_defaults_to_zero(self) -> None:
-        """Test that missing System Runtime defaults to 0."""
+    def test_system_runtime_missing_is_none(self) -> None:
+        """Test that missing System Runtime preserves None."""
         data = {
             "LIV Hub": {
                 "Enable Repellers": True,
@@ -130,7 +130,7 @@ class TestParseDeviceParams:
 
         params = parse_device_params(data)
 
-        assert params.system_runtime == 0
+        assert params.system_runtime is None
 
     def test_parse_empty_hub_params(self) -> None:
         """Test parsing with empty LIV Hub section."""

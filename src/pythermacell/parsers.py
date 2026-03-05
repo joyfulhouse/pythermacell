@@ -51,6 +51,10 @@ def parse_device_params(data: dict[str, Any]) -> DeviceParams:
     # This matches physical device behavior and prevents confusion
     led_power = enable_repellers and brightness > 0 if enable_repellers is not None else None
 
+    # Convert System Runtime from API units (tenths of hours) to minutes
+    raw_runtime = hub_params.get("System Runtime")
+    system_runtime = raw_runtime * SYSTEM_RUNTIME_MULTIPLIER if raw_runtime is not None else None
+
     return DeviceParams(
         power=enable_repellers,  # Use enable_repellers for power status
         led_power=led_power,  # Calculated from enable_repellers and brightness
@@ -58,7 +62,7 @@ def parse_device_params(data: dict[str, Any]) -> DeviceParams:
         led_hue=hub_params.get("LED Hue"),
         led_saturation=hub_params.get("LED Saturation"),
         refill_life=hub_params.get("Refill Life"),
-        system_runtime=(hub_params.get("System Runtime") or 0) * SYSTEM_RUNTIME_MULTIPLIER,
+        system_runtime=system_runtime,
         system_status=hub_params.get("System Status"),
         error=hub_params.get("Error"),
         enable_repellers=enable_repellers,
