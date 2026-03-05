@@ -23,6 +23,11 @@ LED_SATURATION_MAX = 100
 JWT_PARTS_COUNT = 3
 BASE64_PADDING_MODULO = 4
 
+# System Runtime conversion
+# The API returns "System Runtime" in tenths of an hour (6-minute intervals).
+# Multiply by this factor to convert to actual minutes.
+SYSTEM_RUNTIME_MULTIPLIER = 6
+
 # Request Queue Configuration
 DEFAULT_MIN_REQUEST_INTERVAL = 0.5  # 500ms minimum between API calls
 DEFAULT_COMMAND_TIMEOUT = 10.0  # Max time to wait for queued command
