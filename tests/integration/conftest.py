@@ -37,11 +37,10 @@ def integration_config() -> dict[str, str]:
     base_url = os.getenv("THERMACELL_API_BASE_URL", "https://api.iot.thermacell.com")
 
     if not username or not password:
-        msg = (
-            "Missing required environment variables. "
-            "Please create .env file with THERMACELL_USERNAME and THERMACELL_PASSWORD"
+        pytest.skip(
+            "Missing THERMACELL_USERNAME and THERMACELL_PASSWORD environment variables. "
+            "Create .env file or set GitHub Secrets for the integration-tests environment."
         )
-        raise ValueError(msg)
 
     return {
         "username": username,
