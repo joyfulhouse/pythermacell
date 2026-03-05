@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.4] - 2026-03-05
+
+### Fixed
+- **System Runtime conversion**: API returns values in tenths of hours (6-minute intervals), not minutes. Values are now correctly multiplied by 6 to produce accurate minute values (#24, contributed by @sjafferali)
+- **Missing System Runtime preserves None**: When the API doesn't report System Runtime, the value is now correctly `None` instead of silently defaulting to `0`
+- **CI integration tests for fork PRs**: Fork PRs now gracefully skip integration tests instead of failing (GitHub Actions doesn't pass secrets to forks)
+
+### Changed
+- Integration test conftest uses `pytest.skip()` instead of raising `ValueError` when credentials are missing
+- CI workflow detects fork PRs and skips integration tests automatically
+
+### Added
+- GitHub Secrets configured on `integration-tests` environment for CI
+- `SYSTEM_RUNTIME_MULTIPLIER` constant (value: 6) for runtime unit conversion
+- 3 new test cases for System Runtime conversion (normal, zero, missing)
+
 ## [0.2.3] - 2025-11-25
 
 ### Fixed
@@ -69,6 +85,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+[0.2.4]: https://github.com/joyfulhouse/pythermacell/releases/tag/v0.2.4
 [0.2.3]: https://github.com/joyfulhouse/pythermacell/releases/tag/v0.2.3
 [0.2.2]: https://github.com/joyfulhouse/pythermacell/releases/tag/v0.2.2
 [0.1.0]: https://github.com/joyfulhouse/pythermacell/releases/tag/v0.1.0
