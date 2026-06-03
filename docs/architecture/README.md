@@ -301,7 +301,7 @@ await client.get_devices()
 
 ## Future Enhancements
 
-See [../development/IMPROVEMENTS.md](../development/IMPROVEMENTS.md) for detailed roadmap.
+See [../research/IMPROVEMENTS.md](../research/IMPROVEMENTS.md) for detailed roadmap.
 
 ### Planned
 - OAuth 2.0 flow support
@@ -322,4 +322,4 @@ See [../development/IMPROVEMENTS.md](../development/IMPROVEMENTS.md) for detaile
 - [AUTHENTICATION.md](AUTHENTICATION.md) - Complete authentication documentation
 - [RESILIENCE.md](RESILIENCE.md) - Complete resilience documentation
 - [../api/openapi.yaml](../api/openapi.yaml) - API specification
-- [../development/CODE_REVIEW_FEEDBACK.md](../development/CODE_REVIEW_FEEDBACK.md) - Code quality assessment
+- [../research/CODE_REVIEW_FEEDBACK.md](../research/CODE_REVIEW_FEEDBACK.md) - Code quality assessment

@@ -318,7 +318,7 @@ await device.set_led_color(*GREEN)
 ## More Information
 
 - **Full Documentation**: See [README.md](../README.md)
-- **API Reference**: See [docs/API.md](../docs/API.md)
+- **API Reference**: See [docs/api/README.md](../docs/api/README.md)
 - **Source Code**: See [src/pythermacell/](../src/pythermacell/)
 - **Tests**: See [tests/](../tests/)
 

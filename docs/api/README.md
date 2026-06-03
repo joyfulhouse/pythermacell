@@ -228,4 +228,4 @@ openapi-generator-cli generate \
 - [GROUPS_API.md](GROUPS_API.md) - Device grouping functionality
 - [../architecture/AUTHENTICATION.md](../architecture/AUTHENTICATION.md) - Authentication flow
 - [../testing/TESTING.md](../testing/TESTING.md) - API testing guide
-- [../development/DEVICE_POWER_FIX.md](../development/DEVICE_POWER_FIX.md) - Device control implementation
+- [../research/DEVICE_POWER_FIX.md](../research/DEVICE_POWER_FIX.md) - Device control implementation
