@@ -8,15 +8,14 @@ version = "0.2.4"
 description = "Python client library for Thermacell IoT devices using ESP RainMaker API"
 readme = "README.md"
 requires-python = ">=3.13"
-license = {text = "MIT"}
+license = "MIT"
 authors = [
-    {name = "Bryan Li"},
+    {name = "JoyfulHouse Real Estate LLC"},
 ]
 keywords = ["thermacell", "iot", "esp-rainmaker", "async", "client"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
