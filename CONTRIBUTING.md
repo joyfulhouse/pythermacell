@@ -47,14 +47,14 @@ This project follows a code of conduct that we expect all contributors to adhere
 
 ### Install Development Dependencies
 
-```bash
-# Create virtual environment
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+This project uses [uv](https://docs.astral.sh/uv/):
 
-# Install package in development mode with dev dependencies
-pip install -e ".[dev]"
+```bash
+uv sync
 ```
+
+This creates a local virtual environment and installs the package together with
+its development dependencies.
 
 ### Configure Integration Tests
 
@@ -154,29 +154,29 @@ async def test_get_devices():
 
 ```bash
 # Unit tests only (fast)
-pytest tests/ -m "not integration and not manual"
+uv run pytest tests/ -m "not integration and not manual"
 
 # With coverage
-pytest tests/ -m "not integration and not manual" --cov=pythermacell --cov-report=term-missing
+uv run pytest tests/ -m "not integration and not manual" --cov=pythermacell --cov-report=term-missing
 
 # Integration tests (requires credentials)
-pytest tests/integration/ -v
+uv run pytest tests/integration/ -v
 
 # All tests
-pytest tests/ -v
+uv run pytest tests/ -v
 ```
 
 ### Run Specific Tests
 
 ```bash
 # Specific file
-pytest tests/test_client.py -v
+uv run pytest tests/test_client.py -v
 
 # Specific test
-pytest tests/test_client.py::test_get_devices -v
+uv run pytest tests/test_client.py::test_get_devices -v
 
 # Stop on first failure
-pytest tests/ -x
+uv run pytest tests/ -x
 ```
 
 ## Code Quality
@@ -187,16 +187,16 @@ Run these before committing:
 
 ```bash
 # Format code
-ruff format src/ tests/
+uv run ruff format src/ tests/
 
 # Lint code
-ruff check src/ tests/
+uv run ruff check src/ tests/
 
 # Fix auto-fixable issues
-ruff check --fix src/ tests/
+uv run ruff check --fix src/ tests/
 
 # Type checking
-mypy src/pythermacell/
+uv run mypy src/pythermacell/
 ```
 
 ### Quality Standards
@@ -317,7 +317,7 @@ __version__ = "0.2.0"
 
 ### 2. Update CHANGELOG
 
-Add release notes to `docs/CHANGELOG.md`:
+Add release notes to `CHANGELOG.md`:
 
 ```markdown
 ## [0.2.0] - 2025-01-19
@@ -336,7 +336,7 @@ Add release notes to `docs/CHANGELOG.md`:
 ### 3. Create Tag
 
 ```bash
-git add pyproject.toml src/pythermacell/__init__.py docs/CHANGELOG.md
+git add pyproject.toml src/pythermacell/__init__.py CHANGELOG.md
 git commit -m "chore: Bump version to 0.2.0"
 git tag -a v0.2.0 -m "Release version 0.2.0"
 git push origin main --tags
@@ -397,4 +397,4 @@ By contributing, you agree that your contributions will be licensed under the MI
 
 ---
 
-Thank you for contributing to pythermacell! 🎉
+Thank you for contributing to pythermacell!
