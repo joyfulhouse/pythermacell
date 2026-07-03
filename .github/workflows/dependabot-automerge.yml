@@ -23,22 +23,49 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Auto-approve patch and minor updates
-        if: steps.metadata.outputs.update-type == 'version-update:semver-patch' || steps.metadata.outputs.update-type == 'version-update:semver-minor'
+      # Decide how to handle this update:
+      #   - patch / minor (any ecosystem)      -> auto-merge
+      #   - major GitHub Actions bump          -> auto-merge (CI-only, low risk)
+      #   - major bump for any other ecosystem -> approve only, require manual merge
+      # fetch-metadata@v3 emits package-ecosystem "github_actions" for Actions
+      # (derived from the dependabot branch name); "github-actions" is accepted
+      # defensively in case that derivation changes in a future version.
+      - name: Classify update
+        id: classify
         env:
-          PR_URL: ${{ github.event.pull_request.html_url }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh pr review --approve "$PR_URL"
+          UPDATE_TYPE: ${{ steps.metadata.outputs.update-type }}
+          ECOSYSTEM: ${{ steps.metadata.outputs.package-ecosystem }}
+        run: |
+          automerge=false
+          approve_only=false
+          case "$UPDATE_TYPE" in
+            version-update:semver-patch | version-update:semver-minor)
+              automerge=true
+              ;;
+            version-update:semver-major)
+              case "$ECOSYSTEM" in
+                github_actions | github-actions) automerge=true ;;
+                *) approve_only=true ;;
+              esac
+              ;;
+          esac
+          {
+            echo "automerge=$automerge"
+            echo "approve_only=$approve_only"
+          } >> "$GITHUB_OUTPUT"
+          echo "update-type=$UPDATE_TYPE ecosystem=$ECOSYSTEM -> automerge=$automerge approve_only=$approve_only"
 
-      - name: Enable auto-merge for patch and minor updates
-        if: steps.metadata.outputs.update-type == 'version-update:semver-patch' || steps.metadata.outputs.update-type == 'version-update:semver-minor'
+      - name: Auto-approve and enable auto-merge
+        if: steps.classify.outputs.automerge == 'true'
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh pr merge --auto --squash "$PR_URL"
+        run: |
+          gh pr review --approve "$PR_URL"
+          gh pr merge --auto --squash "$PR_URL"
 
       - name: Auto-approve major updates (require manual merge)
-        if: steps.metadata.outputs.update-type == 'version-update:semver-major'
+        if: steps.classify.outputs.approve_only == 'true'
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
