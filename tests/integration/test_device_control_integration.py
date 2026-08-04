@@ -367,9 +367,12 @@ class TestConcurrentControlOperations:
 
         # Wait for final state and verify brightness changed
         # Note: Also verify power is on as LED operations require device to be powered
+        # Use extended window as back-to-back LED commands can take longer to process
         state_updated = await verify_state(
             test_device,
             lambda d: d.led_brightness == 50 and d.is_powered_on,
+            delay=10.0,
+            max_retries=4,
         )
         assert state_updated, "Brightness should update to 50 and device should remain on"
 
