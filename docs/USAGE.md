@@ -130,7 +130,7 @@ print(f"Has Error: {device.has_error}")
 print(f"Refill Life: {device.refill_life}%")
 print(f"Runtime: {device.system_runtime} minutes")
 print(f"Status: {device.system_status}")  # 1=Off, 2=Warming, 3=Protected
-print(f"Error Code: {device.error}")
+print(f"Error Bitfield: {device.error}")
 
 # LED state
 print(f"LED Power: {device.led_power}")
@@ -138,6 +138,11 @@ print(f"LED Brightness: {device.led_brightness}")
 print(f"LED Hue: {device.led_hue}")
 print(f"LED Saturation: {device.led_saturation}")
 ```
+
+> **Note:** `error` is a bitfield, not a scalar code. Some hubs constantly report
+> `16777216` (`0x01000000`) while healthy, and firmware 5.4.1 sets `0x00000008`
+> during warm-up. `has_error` masks these benign bits
+> (`pythermacell.const.BENIGN_ERROR_BITS`); use it instead of `error != 0`.
 
 ## Optimistic Updates
 
@@ -411,11 +416,11 @@ Represents a Thermacell device with control and monitoring capabilities.
 - `serial_number: str` — Device serial number
 - `is_online: bool` — Whether device is connected
 - `is_powered_on: bool` — Whether device is powered on
-- `has_error: bool` — Whether device has an error
+- `has_error: bool` — Whether the device reports a fault (benign bits of the Error bitfield are masked)
 - `refill_life: float | None` — Refill cartridge life percentage (0-100)
 - `system_runtime: int | None` — Current session runtime in minutes
 - `system_status: int | None` — System status (1=Off, 2=Warming, 3=Protected)
-- `error: int | None` — Error code (0=no error)
+- `error: int | None` — Raw error bitfield (0=no error; nonzero may include benign bits such as `0x01000000` heartbeat and `0x00000008` warm-up)
 - `led_power: bool | None` — LED on/off state
 - `led_brightness: int | None` — LED brightness (0-100)
 - `led_hue: int | None` — LED hue (0-360)

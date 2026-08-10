@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from pythermacell.const import BENIGN_ERROR_BITS
+
 
 __all__ = [
     "DeviceInfo",
@@ -80,7 +82,7 @@ class DeviceParams:
         refill_life: Refill cartridge remaining percentage (0-100).
         system_runtime: Current session runtime in minutes.
         system_status: System operational status (1=Off, 2=Warming, 3=Protected).
-        error: Error code (0=no error).
+        error: Error bitfield (0=no error; known benign bits are masked by has_error).
         enable_repellers: Whether repellers are enabled.
     """
 
@@ -124,8 +126,13 @@ class DeviceState:
 
     @property
     def has_error(self) -> bool:
-        """Check if device has an error."""
-        return (self.params.error or 0) > 0
+        """Check if the device is reporting a fault.
+
+        The hub's ``Error`` parameter is a bitfield; known benign bits
+        (``BENIGN_ERROR_BITS``) are masked out. The raw value remains
+        available via ``params.error``.
+        """
+        return bool((self.params.error or 0) & ~BENIGN_ERROR_BITS)
 
 
 @dataclass

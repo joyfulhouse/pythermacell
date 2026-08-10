@@ -403,6 +403,16 @@ class TestDeviceStateProperties:
         assert device.has_error is True
         assert device.error == 5
 
+    async def test_device_benign_error_bits_not_reported(
+        self, mock_api: ThermacellAPI, device_state: DeviceState
+    ) -> None:
+        """Benign heartbeat/warm-up bits must not raise has_error, raw value stays exposed."""
+        device_state.params.error = 0x01000008
+        device = ThermacellDevice(api=mock_api, state=device_state)
+
+        assert device.has_error is False
+        assert device.error == 0x01000008
+
     async def test_device_without_error(self, mock_api: ThermacellAPI, device_state: DeviceState) -> None:
         """Test properties when device has no error."""
         device_state.params.error = 0
