@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-08-10
+
+### Fixed
+- `has_error` no longer reports benign bits of the `Error` bitfield as faults.
+  Bits `0x01000000` (constantly set on some healthy hubs) and `0x00000008`
+  (firmware 5.4.1 warm-up) are masked via `pythermacell.const.BENIGN_ERROR_BITS`;
+  the raw bitfield remains available via `.error`. (#54)
+
 ## [0.2.4] - 2026-03-05
 
 ### Fixed
