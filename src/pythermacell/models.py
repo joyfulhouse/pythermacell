@@ -82,7 +82,7 @@ class DeviceParams:
         refill_life: Refill cartridge remaining percentage (0-100).
         system_runtime: Current session runtime in minutes.
         system_status: System operational status (1=Off, 2=Warming, 3=Protected).
-        error: Error code (0=no error).
+        error: Error bitfield (0=no error; known benign bits are masked by has_error).
         enable_repellers: Whether repellers are enabled.
     """
 

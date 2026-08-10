@@ -105,7 +105,7 @@ class ThermacellDevice:
         serial_number: Device serial number.
         is_online: Whether device is currently connected.
         is_powered_on: Whether device is powered on.
-        has_error: Whether device has an error condition.
+        has_error: Whether the device reports a fault (benign Error bits masked).
     """
 
     def __init__(
@@ -257,7 +257,7 @@ class ThermacellDevice:
 
     @property
     def error(self) -> int | None:
-        """Get error code (0=no error)."""
+        """Get the raw error bitfield (0 = no error; may include benign bits)."""
         return self._state.params.error
 
     @property
