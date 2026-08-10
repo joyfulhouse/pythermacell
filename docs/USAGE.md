@@ -130,7 +130,7 @@ print(f"Has Error: {device.has_error}")
 print(f"Refill Life: {device.refill_life}%")
 print(f"Runtime: {device.system_runtime} minutes")
 print(f"Status: {device.system_status}")  # 1=Off, 2=Warming, 3=Protected
-print(f"Error Code: {device.error}")
+print(f"Error Bitfield: {device.error}")
 
 # LED state
 print(f"LED Power: {device.led_power}")

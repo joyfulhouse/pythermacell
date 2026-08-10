@@ -1,5 +1,7 @@
 """Tests for the parsers module."""
 
+from typing import Any
+
 from pythermacell.models import DeviceInfo, DeviceParams, DeviceState, DeviceStatus
 from pythermacell.parsers import (
     parse_device_info,
@@ -394,7 +396,7 @@ class TestHasErrorBitfield:
     """DeviceState.has_error masks benign Error bits (issue #54)."""
 
     def _state_with_error(self, error_value: int | None) -> DeviceState:
-        params_hub = {"Enable Repellers": True}
+        params_hub: dict[str, Any] = {"Enable Repellers": True}
         if error_value is not None:
             params_hub["Error"] = error_value
         params_data = {"LIV Hub": params_hub}
