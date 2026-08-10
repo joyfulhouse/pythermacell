@@ -388,3 +388,41 @@ class TestParseDeviceState:
         assert state.is_online is False
         assert state.is_powered_on is False
         assert state.has_error is False
+
+
+class TestHasErrorBitfield:
+    """DeviceState.has_error masks benign Error bits (issue #54)."""
+
+    def _state_with_error(self, error_value: int | None) -> DeviceState:
+        params_hub = {"Enable Repellers": True}
+        if error_value is not None:
+            params_hub["Error"] = error_value
+        params_data = {"LIV Hub": params_hub}
+        status_data = {"connectivity": {"connected": True}}
+        config_data = {"info": {"name": "Hub"}, "devices": []}
+        return parse_device_state("node123", params_data, status_data, config_data)
+
+    def test_heartbeat_bit_is_benign(self) -> None:
+        """Bit 0x01000000 is constantly set on some healthy hubs (thermacell_liv#17)."""
+        assert self._state_with_error(0x01000000).has_error is False  # 16777216, healthy hub
+
+    def test_warmup_bit_is_benign(self) -> None:
+        """Bit 0x00000008 is transiently set during firmware 5.4.1 warm-up."""
+        assert self._state_with_error(0x00000008).has_error is False  # fw 5.4.1 warm-up
+
+    def test_combined_benign_bits(self) -> None:
+        """The observed combined value 16777224 must not raise an error."""
+        assert self._state_with_error(0x01000008).has_error is False  # 16777224, observed
+
+    def test_real_fault_bit_still_detected(self) -> None:
+        """A non-benign bit still raises has_error."""
+        assert self._state_with_error(0x00000001).has_error is True
+
+    def test_real_fault_alongside_benign_bits(self) -> None:
+        """A real fault bit is detected even when benign bits are also set."""
+        assert self._state_with_error(0x01000009).has_error is True  # benign + bit 0
+
+    def test_zero_and_none_unchanged(self) -> None:
+        """Error=0 and a missing Error key both leave has_error False."""
+        assert self._state_with_error(0).has_error is False
+        assert self._state_with_error(None).has_error is False  # "Error" key omitted

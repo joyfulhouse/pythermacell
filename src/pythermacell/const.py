@@ -28,6 +28,14 @@ BASE64_PADDING_MODULO = 4
 # Multiply by this factor to convert to actual minutes.
 SYSTEM_RUNTIME_MULTIPLIER = 6
 
+# Error bitfield handling
+# The hub's "Error" parameter is a bitfield, not a scalar error code.
+# Empirically benign bits (masked by has_error):
+#   0x01000000 - constantly set on some healthy hubs (thermacell_liv#17)
+#   0x00000008 - transiently set during firmware 5.4.1 warm-up
+# Matches the mask shipped by the Home Assistant integration (thermacell_liv PR #18).
+BENIGN_ERROR_BITS = 0x01000008
+
 # Request Queue Configuration
 DEFAULT_MIN_REQUEST_INTERVAL = 0.5  # 500ms minimum between API calls
 DEFAULT_COMMAND_TIMEOUT = 10.0  # Max time to wait for queued command

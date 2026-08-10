@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from .const import BENIGN_ERROR_BITS
+
 
 __all__ = [
     "DeviceInfo",
@@ -124,8 +126,13 @@ class DeviceState:
 
     @property
     def has_error(self) -> bool:
-        """Check if device has an error."""
-        return (self.params.error or 0) > 0
+        """Check if the device is reporting a fault.
+
+        The hub's ``Error`` parameter is a bitfield; known benign bits
+        (``BENIGN_ERROR_BITS``) are masked out. The raw value remains
+        available via ``params.error``.
+        """
+        return bool((self.params.error or 0) & ~BENIGN_ERROR_BITS)
 
 
 @dataclass
