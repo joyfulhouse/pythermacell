@@ -35,7 +35,7 @@ SYSTEM_RUNTIME_MULTIPLIER = 6
 #   0x00000008 - transiently set during firmware 5.4.1 warm-up
 #   0x00000040 - firmware 5.4.1 sets at the warm-up-to-Protected transition on healthy hubs;
 #                latches until the next power-on (thermacell_liv#22)
-# Matches the mask shipped by the Home Assistant integration (thermacell_liv PR #18).
+# Extends the Home Assistant integration mask (thermacell_liv PR #18) with 0x00000040 (thermacell_liv#22).
 BENIGN_ERROR_BITS = 0x01000048
 
 # Request Queue Configuration
