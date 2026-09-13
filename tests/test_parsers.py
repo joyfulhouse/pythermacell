@@ -412,9 +412,13 @@ class TestHasErrorBitfield:
         """Bit 0x00000008 is transiently set during firmware 5.4.1 warm-up."""
         assert self._state_with_error(0x00000008).has_error is False  # fw 5.4.1 warm-up
 
+    def test_latching_transition_bit_is_benign(self) -> None:
+        """Bit 0x00000040 latches on healthy firmware 5.4.1 hubs after warm-up."""
+        assert self._state_with_error(0x00000040).has_error is False
+
     def test_combined_benign_bits(self) -> None:
-        """The observed combined value 16777224 must not raise an error."""
-        assert self._state_with_error(0x01000008).has_error is False  # 16777224, observed
+        """The observed combined value 16777288 must not raise an error."""
+        assert self._state_with_error(0x01000048).has_error is False  # 16777288, observed in #22
 
     def test_real_fault_bit_still_detected(self) -> None:
         """A non-benign bit still raises has_error."""
@@ -422,7 +426,8 @@ class TestHasErrorBitfield:
 
     def test_real_fault_alongside_benign_bits(self) -> None:
         """A real fault bit is detected even when benign bits are also set."""
-        assert self._state_with_error(0x01000009).has_error is True  # benign + bit 0
+        assert self._state_with_error(0x01000048).has_error is False
+        assert self._state_with_error(0x01000049).has_error is True  # benign + bit 0
 
     def test_zero_and_none_unchanged(self) -> None:
         """Error=0 and a missing Error key both leave has_error False."""
