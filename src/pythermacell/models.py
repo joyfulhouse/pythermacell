@@ -126,11 +126,11 @@ class DeviceState:
 
     @property
     def has_error(self) -> bool:
-        """Check if the device is reporting a fault.
+        """Heuristically flag diagnostic bits, not the device's operational status.
 
-        The hub's ``Error`` parameter is a bitfield; known benign bits
-        (``BENIGN_ERROR_BITS``) are masked out. The raw value remains
-        available via ``params.error``.
+        The hub's ``Error`` parameter is an undocumented bitfield. Known-benign
+        bits (``BENIGN_ERROR_BITS``) are masked, while the raw diagnostic value
+        remains available via ``params.error``.
         """
         return bool((self.params.error or 0) & ~BENIGN_ERROR_BITS)
 

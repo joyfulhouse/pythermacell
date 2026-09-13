@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-09-13
+
+### Fixed
+- `has_error` no longer reports the latching firmware 5.4.1 bit `0x00000040`
+  as a fault on healthy hubs; the raw bitfield remains available via `.error`.
+  (joyfulhouse/thermacell_liv#22)
+
 ## [0.2.5] - 2026-08-10
 
 ### Fixed

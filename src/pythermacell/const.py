@@ -33,8 +33,10 @@ SYSTEM_RUNTIME_MULTIPLIER = 6
 # Empirically benign bits (masked by has_error):
 #   0x01000000 - constantly set on some healthy hubs (thermacell_liv#17)
 #   0x00000008 - transiently set during firmware 5.4.1 warm-up
+#   0x00000040 - firmware 5.4.1 sets at the warm-up-to-Protected transition on healthy hubs;
+#                latches until the next power-on (thermacell_liv#22)
 # Matches the mask shipped by the Home Assistant integration (thermacell_liv PR #18).
-BENIGN_ERROR_BITS = 0x01000008
+BENIGN_ERROR_BITS = 0x01000048
 
 # Request Queue Configuration
 DEFAULT_MIN_REQUEST_INTERVAL = 0.5  # 500ms minimum between API calls

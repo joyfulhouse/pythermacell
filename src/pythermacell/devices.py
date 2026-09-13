@@ -187,7 +187,7 @@ class ThermacellDevice:
 
     @property
     def has_error(self) -> bool:
-        """Check if the device reports a fault (benign Error bits masked)."""
+        """Heuristic masking benign undocumented Error bits; raw ``.error`` remains, not operational status."""
         return self._state.has_error
 
     @property
