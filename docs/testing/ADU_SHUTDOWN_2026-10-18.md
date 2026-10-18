@@ -26,9 +26,21 @@ source 7. Pool transiently reported Error=8 and ADU Error=72 during the broader
 sequence despite operational Off; these raw bits are retained as observations,
 not interpreted as proof of heater operation or a new diagnosed failure.
 
+A later repetition with the HA mitigation candidate installed reproduced the
+ADU failure in the standalone native test: false enable flag, both operational
+codes 2, Error=8. Six additional five-second polls and verified-off cleanup
+failed. A separate authenticated client read the same fresh cloud report.
+Another verified off failed, and cancelling the native timer followed by
+verified off also failed. The schedule array was empty, but operational codes
+remained 2 and command source remained 7. Thus retaining an expired schedule
+was not sufficient to explain the stuck report. Explicit advertised reboot
+recovery was needed again. The native test uses no HA-owned deadline, so this
+failure is outside the HA expiry monitor's scope.
+
 Passing repetitions do not invalidate the prior failure or establish a fix.
-There is no evidence that increasing the polling window, changing timer/command
-ordering, or automatically rebooting would resolve the underlying problem.
+Increasing the polling window and removing the timer before retrying off did
+not resolve this reproduction. There is no evidence that changing timer/start
+ordering or automatically rebooting would resolve the underlying problem.
 Without device-side telemetry, fresh cloud responses alone cannot separate stale
 cloud reporting from firmware behavior or prove physical heater shutdown.
 
