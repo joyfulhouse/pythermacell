@@ -55,6 +55,9 @@ jobs:
     name: Unit Tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      matrix:
+        protobuf: [">=5.29.0,<6", ">=6,<7", ">=7,<8"]
     steps:
       - uses: actions/checkout@v7
 
@@ -72,7 +75,7 @@ jobs:
 
       - name: Run unit tests
         run: |
-          uv run pytest tests/ -m "not integration and not manual" \
+          uv run --with 'protobuf${{ matrix.protobuf }}' pytest tests/ -m "not integration and not manual" \
             --cov=pythermacell \
             --cov-report=term-missing \
             --cov-report=xml \
@@ -91,7 +94,7 @@ jobs:
         uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: coverage-html-py3.13
+          name: coverage-html-py3.13-protobuf-${{ strategy.job-index }}
           path: htmlcov/
           retention-days: 30
 
@@ -99,9 +102,18 @@ jobs:
         uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: pytest-results-py3.13
+          name: pytest-results-py3.13-protobuf-${{ strategy.job-index }}
           path: pytest.xml
           retention-days: 30
+
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    needs: [test]
+    if: always()
+    steps:
+      - name: Check protobuf matrix
+        run: test '${{ needs.test.result }}' = success
 
   integration-tests:
     name: Integration Tests

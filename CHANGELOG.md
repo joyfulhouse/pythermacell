@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0b2] - 2026-10-18
+
+### Fixed
+- Allow protobuf 7 so Home Assistant installations pinned to protobuf 7.36.0
+  can install the native-control beta. Test the supported protobuf 5, 6, and 7
+  runtime families in CI.
+
 ## [0.2.7] - 2026-10-18
 
 ### Fixed
