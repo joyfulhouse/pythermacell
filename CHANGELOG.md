@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Verified off requires an explicit integer operational Off report; missing or
+  malformed status can no longer pass on a false enable flag alone.
+- Native shutdown hardware regression collects bounded settling evidence after
+  expiry failure and logs only allowlisted shutdown fields, preserving strict
+  assertions and the native safeguard when cleanup cannot confirm shutdown.
+
 ## [0.3.0b3] - 2026-10-18
 
 ### Fixed
