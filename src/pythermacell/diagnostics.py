@@ -10,7 +10,7 @@ import logging
 import os
 import socket
 import sys
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from datetime import UTC, datetime
 from functools import partial
 from http import HTTPStatus
@@ -21,6 +21,7 @@ from unittest.mock import patch
 from aiohttp import ClientSession, ClientTimeout, DummyCookieJar
 
 from pythermacell.client import ThermacellClient
+from pythermacell.const import DEFAULT_BASE_URL, DEVICE_TYPE_LIV_HUB, LED_BRIGHTNESS_MAX
 from pythermacell.local import SERVICE_TYPE, LocalTransport
 from pythermacell.parsers import parse_device_state
 from pythermacell.services import HubServices
@@ -34,9 +35,9 @@ if TYPE_CHECKING:
 
 LED_NAMES = ("LED Brightness", "LED Hue", "LED Saturation", "LED Power")
 READ_NAMES = (*LED_NAMES, "Enable Repellers", "System State", "System Status", "Error", "Refill Life")
-MAX_BRIGHTNESS = 100
+MAX_BRIGHTNESS = LED_BRIGHTNESS_MAX
 MAX_DISCOVERY_SECONDS = 60
-CLOUD_URL = "https://api.iot.thermacell.com/"
+CLOUD_URL = f"{DEFAULT_BASE_URL}/"
 STAGES = ("discovery", "metadata", "handshake", "identity", "properties", "led_write", "led_readback", "restore")
 
 
@@ -47,7 +48,7 @@ def stage(report: dict[str, Any], name: str, status: str, **details: Any) -> Non
 
 def selected_values(params: dict[str, Any], names: tuple[str, ...] = READ_NAMES) -> dict[str, Any]:
     """Exclude service values and arbitrary fields, including nested secrets."""
-    hub = params.get("LIV Hub", {})
+    hub = params.get(DEVICE_TYPE_LIV_HUB, {})
     return {name: hub[name] for name in names if name in hub and type(hub[name]) in (bool, int, float)}
 
 
@@ -139,11 +140,11 @@ def led_settings(config: dict[str, Any], params: dict[str, Any]) -> dict[str, An
     advertised = {
         p["name"]
         for device in config.get("devices", [])
-        if device.get("name") == "LIV Hub"
+        if device.get("name") == DEVICE_TYPE_LIV_HUB
         for p in device.get("params", [])
         if isinstance(p.get("name"), str) and p["name"].startswith("LED ")
     }
-    present = {name for name in params.get("LIV Hub", {}) if name.startswith("LED ")}
+    present = {name for name in params.get(DEVICE_TYPE_LIV_HUB, {}) if name.startswith("LED ")}
     values = selected_values(params, LED_NAMES)
     if not advertised or advertised | present != values.keys():
         msg = "Incomplete or unknown LED settings; refusing writes"
@@ -155,7 +156,7 @@ async def restore_led(transport: LocalTransport, original: dict[str, Any], repor
     """Restore only the changed brightness and verify the entire LED snapshot."""
     try:
         async with asyncio.timeout(45):
-            await transport.write({"LIV Hub": {"LED Brightness": original["LED Brightness"]}})
+            await transport.write({DEVICE_TYPE_LIV_HUB: {"LED Brightness": original["LED Brightness"]}})
             config, params = await transport.read()
             restored = led_settings(config, params)
             stage(report, "restore", "passed" if restored == original else "RESTORE_FAILED", values=restored)
@@ -174,7 +175,7 @@ async def exercise_led(transport: LocalTransport, report: dict[str, Any]) -> Non
     writable = any(
         p.get("name") == "LED Brightness" and "write" in p.get("properties", [])
         for device in config.get("devices", [])
-        if device.get("name") == "LIV Hub"
+        if device.get("name") == DEVICE_TYPE_LIV_HUB
         for p in device.get("params", [])
     )
     brightness = original.get("LED Brightness")
@@ -185,7 +186,7 @@ async def exercise_led(transport: LocalTransport, report: dict[str, Any]) -> Non
     report["led_before"] = original
     try:
         async with asyncio.timeout(30):
-            await transport.write({"LIV Hub": {"LED Brightness": changed}})
+            await transport.write({DEVICE_TYPE_LIV_HUB: {"LED Brightness": changed}})
             stage(report, "led_write", "passed", values={"LED Brightness": changed})
             config, params = await transport.read()
             actual = led_settings(config, params)
@@ -290,7 +291,7 @@ async def diagnose_node(
     """Run staged direct transport checks for exactly one account node."""
     if report is None:
         report = new_report(node)
-    report["name"] = str(params.get("LIV Hub", {}).get("Name", node))
+    report["name"] = str(params.get(DEVICE_TYPE_LIV_HUB, {}).get("Name", node))
     report["cloud_firmware"] = str(config.get("info", {}).get("fw_version", "unknown"))
     report["cloud_baseline"] = selected_values(params)
     report["stages"]["metadata"] = metadata_report(services)
@@ -349,12 +350,16 @@ async def run(args: argparse.Namespace) -> int:
     allowed = {(ip, entry["port"]) for entry in discovered for ip in entry["addresses"]}
     reports = []
 
-    async def local_phase(denial: dict[str, Any]) -> None:
+    with deny_cloud(allowed) if args.deny_cloud else nullcontext({"status": "not_performed"}) as evidence:
+        if args.deny_cloud:
+            await probe_denial(evidence)
+            if evidence["status"] != "verified":
+                args.write_led = False
         for node, config, params, services in nodes:
             if args.node_id and node != args.node_id:
                 continue
             report = new_report(node)
-            report["cloud_denial"] = dict(denial)
+            report["cloud_denial"] = dict(evidence)
             try:
                 await diagnose_node(
                     node, config, params, discovered, services=services, write_led=args.write_led, report=report
@@ -365,14 +370,6 @@ async def run(args: argparse.Namespace) -> int:
             if report["stages"]["restore"]["status"] == "RESTORE_FAILED":
                 break
 
-    if args.deny_cloud:
-        with deny_cloud(allowed) as evidence:
-            await probe_denial(evidence)
-            if evidence["status"] != "verified":
-                args.write_led = False
-            await local_phase(evidence)
-    else:
-        await local_phase({"status": "not_performed"})
     if any(r["stages"]["restore"]["status"] == "RESTORE_FAILED" for r in reports):
         return 3
     if args.deny_cloud and any(r["cloud_denial"]["status"] != "verified" for r in reports):
