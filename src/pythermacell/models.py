@@ -92,6 +92,7 @@ class DeviceParams:
     led_hue: int | None = None
     led_saturation: int | None = None
     refill_life: float | None = None
+    cartridge_present: bool | None = None
     system_runtime: int | None = None
     system_status: int | None = None
     error: int | None = None

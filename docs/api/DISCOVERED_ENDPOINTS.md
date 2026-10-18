@@ -1,5 +1,7 @@
 # Discovered API Endpoints from Android APK Analysis
 
+Historical endpoint inventory. For the implemented Android 4.0.5 contracts and validation limits, see [Native Services](NATIVE_SERVICES.md) and the [2026-10-18 audit](APK_AUDIT_2026-10-18.md).
+
 **Date**: 2025-01-18
 **Source**: Decompiled Thermacell LIV Android APK v1.5.0+
 **Analysis Method**: Static analysis of smali bytecode in `research/com.thermacell.liv/`

@@ -9,11 +9,12 @@ from __future__ import annotations
 import asyncio
 import logging
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, overload
 
 from aiohttp import ClientError, ClientSession, ClientTimeout
 
 from pythermacell.const import DEFAULT_BASE_URL, DEFAULT_TIMEOUT
+from pythermacell.local import LocalEndpoint, LocalTransport
 
 
 # Maximum number of rate-limit retries to prevent infinite recursion
@@ -93,6 +94,8 @@ class ThermacellAPI:
         self._session = session
         self._owns_session = session is None
         self._base_url = base_url.rstrip("/")
+        self.local_transports: dict[str, LocalTransport] = {}
+        self.last_transport: dict[str, str] = {}
 
         # Store resilience patterns
         self._circuit_breaker = circuit_breaker
@@ -152,6 +155,19 @@ class ThermacellAPI:
         if self._owns_session and self._session is not None:
             await self._session.close()
 
+    @overload
+    async def request(
+        self,
+        method: str,
+        endpoint: str,
+        *,
+        json_data: list[dict[str, Any]],
+        params: dict[str, str] | None = None,
+        retry_auth: bool = True,
+        _rate_limit_retries: int = 0,
+    ) -> tuple[int, dict[str, Any] | list[dict[str, Any]] | None]: ...
+
+    @overload
     async def request(
         self,
         method: str,
@@ -161,7 +177,18 @@ class ThermacellAPI:
         params: dict[str, str] | None = None,
         retry_auth: bool = True,
         _rate_limit_retries: int = 0,
-    ) -> tuple[int, dict[str, Any] | None]:
+    ) -> tuple[int, dict[str, Any] | None]: ...
+
+    async def request(
+        self,
+        method: str,
+        endpoint: str,
+        *,
+        json_data: dict[str, Any] | list[dict[str, Any]] | None = None,
+        params: dict[str, str] | None = None,
+        retry_auth: bool = True,
+        _rate_limit_retries: int = 0,
+    ) -> tuple[int, dict[str, Any] | list[dict[str, Any]] | None]:
         """Make an authenticated API request.
 
         This is the core method for all HTTP communication. It handles:
@@ -257,7 +284,7 @@ class ThermacellAPI:
 
                 # Parse response if successful
                 response_data = None
-                if response.status in (HTTPStatus.OK, HTTPStatus.CREATED, HTTPStatus.NO_CONTENT):
+                if response.status in (HTTPStatus.OK, HTTPStatus.CREATED, HTTPStatus.ACCEPTED, HTTPStatus.NO_CONTENT):
                     # Check content-type with substring match to handle charset parameters
                     # e.g., "application/json; charset=utf-8"
                     if response.status != HTTPStatus.NO_CONTENT and "application/json" in response.content_type:
@@ -278,6 +305,50 @@ class ThermacellAPI:
     # -------------------------------------------------------------------------
     # Device Endpoints
     # -------------------------------------------------------------------------
+    def configure_local(self, endpoint: LocalEndpoint) -> None:
+        """Pair an mDNS address with the authenticated account's credentials."""
+        if self._session is None:
+            msg = "Initialize the client before configuring local control"
+            raise RuntimeError(msg)
+        self.local_transports[endpoint.node_id] = LocalTransport(self._session, endpoint)
+
+    async def read_local(self, node_id: str) -> tuple[dict[str, Any], dict[str, Any]] | None:
+        """Try a local snapshot; read failures may safely fall back to cloud."""
+        transport = self.local_transports.get(node_id)
+        if transport:
+            try:
+                snapshot = await transport.read()
+            except Exception as err:
+                _LOGGER.debug("Local read unavailable for %s (%s)", node_id, type(err).__name__)
+            else:
+                self.last_transport[node_id] = "local"
+                return snapshot
+        self.last_transport[node_id] = "cloud"
+        return None
+
+    async def get_firmware_update(self, node_id: str) -> tuple[int, dict[str, Any] | None]:
+        """Check the cloud OTA offer for a node."""
+        return await self.request("GET", "/user/nodes/ota_update", params={"node_id": node_id})
+
+    async def start_firmware_update(self, node_id: str, job_id: str) -> tuple[int, dict[str, Any] | None]:
+        """Trigger the offered OTA job."""
+        return await self.request(
+            "POST", "/user/nodes/ota_update", json_data={"node_id": node_id, "ota_job_id": job_id}
+        )
+
+    async def get_firmware_status(self, node_id: str, job_id: str) -> tuple[int, dict[str, Any] | None]:
+        """Fetch the stage of a previously offered OTA job."""
+        return await self.request("GET", "/user/nodes/ota_status", params={"node_id": node_id, "ota_job_id": job_id})
+
+    async def update_multiple_nodes(
+        self, payloads: dict[str, dict[str, Any]]
+    ) -> tuple[int, dict[str, Any] | list[dict[str, Any]] | None]:
+        """Submit the app's bulk-node format; callers must verify each node."""
+        return await self.request(
+            "PUT",
+            "/user/nodes/params",
+            json_data=[{"node_id": node_id, "payload": payload} for node_id, payload in payloads.items()],
+        )
 
     async def get_nodes(self) -> tuple[int, dict[str, Any] | None]:
         """Get list of all devices (nodes) for the authenticated user.
@@ -298,6 +369,8 @@ class ThermacellAPI:
             Tuple of (status_code, response_data) where response_data has format:
             {"LIV Hub": {"Power": bool, "LED Brightness": int, ...}}
         """
+        if snapshot := await self.read_local(node_id):
+            return 200, snapshot[1]
         return await self.request("GET", "/user/nodes/params", params={"node_id": node_id})
 
     async def get_node_status(self, node_id: str) -> tuple[int, dict[str, Any] | None]:
@@ -340,6 +413,13 @@ class ThermacellAPI:
         Returns:
             Tuple of (status_code, response_data).
         """
+        if (transport := self.local_transports.get(node_id)) and self.last_transport.get(node_id, "local") == "local":
+            # A local timeout can occur after the write reached the hub. Never
+            # replay it through the cloud (especially reset/reboot/timer writes).
+            await transport.write(params)
+            self.last_transport[node_id] = "local"
+            return 200, {}
+        self.last_transport[node_id] = "cloud"
         return await self.request(
             "PUT",
             "/user/nodes/params",

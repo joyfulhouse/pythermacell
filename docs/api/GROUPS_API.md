@@ -26,7 +26,7 @@ The Thermacell Groups API allows users to organize multiple devices into logical
 
 - **No Group Control Endpoints**: Groups do NOT have dedicated `/params`, `/status`, or `/config` endpoints
 - **Control Pattern**: To control a group, fetch node IDs via `/v1/user/nodes?group_id={id}`, then control each device individually
-- **No Bulk Operations**: The API does not support setting parameters for all devices in a group with a single request
+- **Bulk Node Operations**: Android 4.0.5 sends arrays of `node_id`/`payload` objects to `PUT /v1/user/nodes/params`. There is no verified group-specific params endpoint. See [current contracts](NATIVE_SERVICES.md).
 
 ## Endpoint Details
 
@@ -190,7 +190,7 @@ async def main():
         groups = await client.get_groups()
 
         for group in groups:
-            print(f"Group: {group.name} ({group.total} devices)")
+            print(f"Group: {group.group_name} ({group.total} devices)")
 
             # Get devices in this group
             devices = await client.get_group_devices(group.group_id)

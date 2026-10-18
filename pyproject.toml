@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pythermacell"
-version = "0.2.7"
+version = "0.3.0b1"
 description = "Python client library for Thermacell IoT devices using ESP RainMaker API"
 readme = "README.md"
 requires-python = ">=3.13"
@@ -25,6 +25,8 @@ classifiers = [
 
 dependencies = [
     "aiohttp>=3.13.2",
+    "cryptography>=44.0.0",
+    "protobuf>=5.29.0,<7",
 ]
 
 [project.optional-dependencies]
@@ -37,6 +39,7 @@ dev = [
     "ruff>=0.14.4",
     "python-dotenv>=1.0.0",
     "twine>=6.0.1",
+    "types-protobuf>=7.35.1.20260906",
 ]
 
 [project.urls]
@@ -82,6 +85,7 @@ parallel = true
 omit = [
     "tests/*",
     "*/test_*.py",
+    "*/_proto/*_pb2.py",
 ]
 
 [tool.coverage.report]
@@ -125,7 +129,12 @@ disallow_incomplete_defs = false
 module = "aiohttp.*"
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = "pythermacell._proto.*"
+disallow_any_generics = false
+
 [tool.ruff]
+extend-exclude = ["src/pythermacell/_proto/*_pb2.py", "src/pythermacell/_proto/*_pb2.pyi"]
 target-version = "py313"
 line-length = 120
 indent-width = 4
