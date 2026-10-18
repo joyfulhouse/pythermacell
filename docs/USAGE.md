@@ -86,7 +86,6 @@ The Thermacell LIV Hub has an RGB LED that can be controlled:
 # Set LED color using HSV values
 await device.set_led_color(
     hue=0,          # Red (0-360)
-    saturation=100, # Full saturation (0-100)
     brightness=80,  # 80% brightness (0-100)
 )
 
@@ -97,10 +96,10 @@ await device.set_led_brightness(50)  # 50%
 await device.set_led_power(True)
 
 # Common colors (HSV hue values)
-await device.set_led_color(hue=0, saturation=100, brightness=100)    # Red
-await device.set_led_color(hue=120, saturation=100, brightness=100)  # Green
-await device.set_led_color(hue=240, saturation=100, brightness=100)  # Blue
-await device.set_led_color(hue=60, saturation=100, brightness=100)   # Yellow
+await device.set_led_color(hue=0, brightness=100)    # Red
+await device.set_led_color(hue=120, brightness=100)  # Green
+await device.set_led_color(hue=240, brightness=100)  # Blue
+await device.set_led_color(hue=60, brightness=100)   # Yellow
 ```
 
 **Important**: The LED can only be "on" when both:
@@ -534,7 +533,7 @@ async def control_device():
         device = devices[0]
 
         await device.turn_on()
-        await device.set_led_color(hue=240, saturation=100, brightness=80)
+        await device.set_led_color(hue=240, brightness=80)
 
         print(f"Device {device.name} is now on with a blue LED")
 

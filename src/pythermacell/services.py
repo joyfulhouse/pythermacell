@@ -206,7 +206,7 @@ class HubServices:
     async def set_timezone(self, timezone: str) -> None:
         """Set an IANA timezone using the same parameter as the app."""
         try:
-            ZoneInfo(timezone)
+            await asyncio.to_thread(ZoneInfo, timezone)
         except (ZoneInfoNotFoundError, ValueError) as err:
             msg = "Unknown IANA timezone"
             raise InvalidParameterError(msg) from err
