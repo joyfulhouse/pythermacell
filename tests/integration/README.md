@@ -24,6 +24,32 @@ pip install -e ".[dev]"
 
 ## Running Integration Tests
 
+### Firmware 5.4.7 timed shutdown regression
+
+Issue joyfulhouse/thermacell_liv#30 reports an acknowledged off command with
+`Enable Repellers=false` while both operational codes remain 2 (Warming Up).
+The cause and physical heater state remain unverified. Keep strict off
+confirmation; a bulk or individual API acknowledgement does not prove shutdown.
+
+Use a supervised, initially off hub with no schedules. Set credentials as above
+and select the hub explicitly. Run separately for each affected hub:
+
+```bash
+THERMACELL_TIMED_SHUTDOWN_REGRESSION=1 THERMACELL_TEST_NODE_ID=your_node_id \
+  uv run pytest tests/integration/test_timed_shutdown_regression.py \
+  --no-cov -v --log-cli-level=DEBUG --log-file=timed-shutdown.log
+```
+
+This installs a native 20-second timer, confirms on and timer expiry, then
+installs a 60-second timer before confirmed on and manual verified off, matching
+the library operations used by HA `run_for(minutes=1)`. It records raw recovery
+polls for another minute after failed confirmation and attempts verified off
+during cleanup. It removes the test timer only after confirmed shutdown; inspect
+the hub if cleanup fails. LED settings and refill counters are never written.
+Retain logs with firmware, command source, and hub identity for comparison with
+the HA individual/group replay in `thermacell_liv/tests/test_features.py`.
+The test is skipped without explicit opt-in, before authentication fixtures run.
+
 ### Run all integration tests:
 ```bash
 pytest tests/integration -v -m integration

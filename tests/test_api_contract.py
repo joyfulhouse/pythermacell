@@ -3,6 +3,7 @@
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 from aiohttp import web
 
 from pythermacell.api import ThermacellAPI
@@ -37,9 +38,18 @@ async def test_node_queries_and_empty_success(aiohttp_client: Any) -> None:
     assert len(received) == 4
 
 
-async def test_bulk_node_payload_and_individual_results(aiohttp_client: Any) -> None:
+@pytest.mark.parametrize("status", [200, 207])
+@pytest.mark.parametrize("second_result", ["success", "failure"])
+async def test_bulk_node_payload_and_individual_results(aiohttp_client: Any, status: int, second_result: str) -> None:
     """A bulk HTTP success does not imply success for every member."""
-    results = [{"node_id": "a", "status": "success"}, {"node_id": "b", "status": "failure"}]
+    results = [
+        {"node_id": "a", "status": "success", "description": "Node State updated"},
+        {
+            "node_id": "b",
+            "status": second_result,
+            "description": "Node State updated" if second_result == "success" else "Node unavailable",
+        },
+    ]
 
     async def endpoint(request: web.Request) -> web.Response:
         assert not request.query
@@ -47,7 +57,7 @@ async def test_bulk_node_payload_and_individual_results(aiohttp_client: Any) -> 
             {"node_id": "a", "payload": {"LIV Hub": {"Enable Repellers": False}}},
             {"node_id": "b", "payload": {"LIV Hub": {"Power": False}}},
         ]
-        return web.json_response(results)
+        return web.json_response(results, status=status)
 
     app = web.Application()
     app.router.add_put("/v1/user/nodes/params", endpoint)
@@ -60,4 +70,4 @@ async def test_bulk_node_payload_and_individual_results(aiohttp_client: Any) -> 
             "a": {"LIV Hub": {"Enable Repellers": False}},
             "b": {"LIV Hub": {"Power": False}},
         }
-    ) == (200, results)
+    ) == (status, results)

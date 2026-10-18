@@ -284,7 +284,13 @@ class ThermacellAPI:
 
                 # Parse response if successful
                 response_data = None
-                if response.status in (HTTPStatus.OK, HTTPStatus.CREATED, HTTPStatus.ACCEPTED, HTTPStatus.NO_CONTENT):
+                if response.status in (
+                    HTTPStatus.OK,
+                    HTTPStatus.CREATED,
+                    HTTPStatus.ACCEPTED,
+                    HTTPStatus.NO_CONTENT,
+                    HTTPStatus.MULTI_STATUS,
+                ):
                     # Check content-type with substring match to handle charset parameters
                     # e.g., "application/json; charset=utf-8"
                     if response.status != HTTPStatus.NO_CONTENT and "application/json" in response.content_type:

@@ -1089,7 +1089,7 @@ wheels = [
 
 [[package]]
 name = "pythermacell"
-version = "0.3.0b2"
+version = "0.3.0b3"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
