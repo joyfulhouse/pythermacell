@@ -543,6 +543,26 @@ async def test_unconfirmed_off_fails(device: ThermacellDevice, mock_api: Thermac
     assert device.is_powered_on
 
 
+async def test_warming_up_after_acknowledged_off_preserves_failure_evidence(
+    device: ThermacellDevice, mock_api: ThermacellAPI, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Replay firmware 5.4.7's contradictory shutdown report (HA issue #30)."""
+    from unittest.mock import patch
+
+    mock_api.get_node_params.return_value = (
+        HTTPStatus.OK,
+        {"LIV Hub": {"Enable Repellers": False, "System State": 2, "System Status": 2, "Error": 0}},
+    )
+    with patch("pythermacell.devices.asyncio.sleep", new_callable=AsyncMock):
+        assert not await device.set_power(False, verify=True)
+    assert mock_api.get_node_params.await_count == 6
+    assert device.is_powered_on
+    assert "'Enable Repellers': False" in caplog.text
+    assert "'System State': 2" in caplog.text
+    assert "'System Status': 2" in caplog.text
+    assert "'Error': 0" in caplog.text
+
+
 async def test_config_advertised_power_parameter(device: ThermacellDevice, mock_api: ThermacellAPI) -> None:
     """Match the app's parameter-type lookup instead of assuming a field name."""
     device._state.raw_data["config"] = {

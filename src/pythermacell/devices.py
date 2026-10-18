@@ -365,15 +365,22 @@ class ThermacellDevice:
         Delays match the Android PowerStateCoordinator reconciliation schedule.
         """
         power_param = self._power_parameter_name()
+        last_report: dict[str, Any] = {}
+        last_status: int | None = None
         try:
             async with asyncio.timeout(20):
                 for delay in (0, 0.5, 1, 2, 4, 5):
                     if delay:
                         await asyncio.sleep(delay)
                     status, data = await self._api.get_node_params(self.node_id)
+                    last_status = status
                     if status != HTTPStatus.OK or data is None:
                         continue
                     hub = data.get(DEVICE_TYPE_LIV_HUB, {})
+                    last_report = {
+                        key: hub[key] for key in (power_param, "System State", "System Status", "Error") if key in hub
+                    }
+                    _LOGGER.debug("Device %s confirming power=%s: %s", self.node_id, power_on, last_report)
                     if hub.get(power_param) is not power_on:
                         continue
                     states = [hub[key] for key in ("System State", "System Status") if key in hub]
@@ -385,7 +392,13 @@ class ThermacellDevice:
                         return True
         except TimeoutError:
             _LOGGER.warning("Timed out confirming device %s power", self.node_id)
-        _LOGGER.warning("Device %s did not confirm power=%s", self.node_id, power_on)
+        _LOGGER.warning(
+            "Device %s did not confirm power=%s; last HTTP status=%s, reported parameters=%s",
+            self.node_id,
+            power_on,
+            last_status,
+            last_report,
+        )
         return False
 
     async def set_led_power(self, power_on: bool) -> bool:

@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0b3] - 2026-10-18
+
+### Fixed
+- Preserve HTTP 207 bulk response arrays, including per-node success/failure
+  descriptions, with HTTP contract coverage for successful and mixed batches (#69).
+- Include reported power, operational state/status, and error codes in failed
+  power-confirmation logs. Preserve strict failure for contradictory off reports.
+
+### Tests
+- Add an opt-in firmware 5.4.7 timed shutdown reproduction with raw recovery
+  polling and verified cleanup. Hardware root cause remains under investigation
+  (joyfulhouse/thermacell_liv#30).
+
 ## [0.3.0b2] - 2026-10-18
 
 ### Fixed
