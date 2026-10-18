@@ -6,6 +6,7 @@ and ThermacellDevice to convert raw API responses into data models.
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from pythermacell.const import DEVICE_TYPE_LIV_HUB, SYSTEM_RUNTIME_MULTIPLIER
@@ -18,6 +19,8 @@ __all__ = [
     "parse_device_state",
     "parse_device_status",
 ]
+
+MAX_REFILL_PERCENT = 100
 
 
 def get_power_parameter_name(config: dict[str, Any]) -> str:
@@ -69,15 +72,20 @@ def parse_device_params(data: dict[str, Any], config: dict[str, Any] | None = No
     raw_runtime = hub_params.get("System Runtime")
     system_runtime = raw_runtime * SYSTEM_RUNTIME_MULTIPLIER if raw_runtime is not None else None
 
+    refill = hub_params.get("Refill Life")
+    valid_refill = type(refill) in (int, float) and math.isfinite(refill) and 0 <= refill <= MAX_REFILL_PERCENT
+    present = True if valid_refill else False if type(refill) in (int, float) and refill == -1 else None
+
     return DeviceParams(
         power=enable_repellers,  # Use enable_repellers for power status
         led_power=led_power,  # Calculated from enable_repellers and brightness
         led_brightness=brightness,
         led_hue=hub_params.get("LED Hue"),
         led_saturation=hub_params.get("LED Saturation"),
-        refill_life=hub_params.get("Refill Life"),
+        refill_life=float(refill) if valid_refill else None,
+        cartridge_present=present,
         system_runtime=system_runtime,
-        system_status=hub_params.get("System Status"),
+        system_status=hub_params.get("System Status", hub_params.get("System State")),
         error=hub_params.get("Error"),
         enable_repellers=enable_repellers,
     )

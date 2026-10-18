@@ -15,7 +15,7 @@ from pythermacell.api import ThermacellAPI
 from pythermacell.auth import AuthenticationHandler
 from pythermacell.const import DEFAULT_BASE_URL
 from pythermacell.devices import ThermacellDevice
-from pythermacell.exceptions import DeviceError
+from pythermacell.exceptions import AuthenticationError, DeviceError
 from pythermacell.models import DeviceState, Group
 from pythermacell.parsers import parse_device_state
 
@@ -202,11 +202,19 @@ class ThermacellClient:
             ThermacellConnectionError: If connection fails.
         """
         # Get list of node IDs
-        status, data = await self._api.get_nodes()
+        try:
+            status, data = await self._api.get_nodes()
+        except Exception:
+            if not self._api.local_transports or not self._devices:
+                raise
+            status, data = HTTPStatus.OK, {"nodes": list(self._devices)}
 
         if status != HTTPStatus.OK or data is None:
-            msg = f"Failed to get devices: HTTP {status}"
-            raise DeviceError(msg)
+            if status >= HTTPStatus.INTERNAL_SERVER_ERROR and self._api.local_transports and self._devices:
+                status, data = HTTPStatus.OK, {"nodes": list(self._devices)}
+            else:
+                msg = f"Failed to get devices: HTTP {status}"
+                raise DeviceError(msg)
 
         node_ids = data.get("nodes", [])
         if not node_ids:
@@ -215,11 +223,21 @@ class ThermacellClient:
         # Fetch full state for all devices concurrently
         states = await asyncio.gather(
             *[self._fetch_device_state(node_id) for node_id in node_ids],
+            return_exceptions=True,
         )
 
         # Create or update device objects
         devices: list[ThermacellDevice] = []
-        for state in states:
+        for node_id, result in zip(node_ids, states, strict=True):
+            if isinstance(result, AuthenticationError):
+                raise result
+            state = result if isinstance(result, DeviceState) else None
+            if state is None and node_id in self._devices:
+                # A transient read failure must not remove a registered hub.
+                cached = self._devices[node_id]
+                cached._state.status.connected = False
+                devices.append(cached)
+                continue
             if state is not None:
                 # Use cached device if available, otherwise create new
                 if state.info.node_id in self._devices:
@@ -313,7 +331,7 @@ class ThermacellClient:
             return_exceptions=True,
         )
 
-    async def _fetch_device_state(
+    async def _fetch_device_state(  # noqa: PLR0911 - each failed endpoint has distinct handling
         self,
         node_id: str,
         *,
@@ -336,6 +354,10 @@ class ThermacellClient:
         Returns:
             DeviceState instance if successful, None if device not found.
         """
+        if snapshot := await self._api.read_local(node_id):
+            config, params = snapshot
+            return parse_device_state(node_id, params, {"connectivity": {"connected": True}}, config)
+
         # Build list of coroutines to fetch
         if skip_config and existing_state is not None:
             # Lightweight refresh: only params and status (2 API calls)
@@ -389,7 +411,7 @@ class ThermacellClient:
     # Group Management
     # -------------------------------------------------------------------------
 
-    async def get_groups(self) -> list[Group]:
+    async def get_groups(self, *, strict: bool = False) -> list[Group]:
         """Get all groups for the authenticated user.
 
         Returns:
@@ -402,6 +424,9 @@ class ThermacellClient:
         status, data = await self._api.get_groups()
 
         if status != HTTPStatus.OK or data is None:
+            if strict:
+                msg = f"Cannot refresh group membership: HTTP {status}"
+                raise DeviceError(msg)
             _LOGGER.warning("Failed to get groups: HTTP %d", status)
             return []
 
@@ -455,7 +480,7 @@ class ThermacellClient:
             total=group_data.get("total", 0),
         )
 
-    async def get_group_nodes(self, group_id: str) -> list[str]:
+    async def get_group_nodes(self, group_id: str, *, strict: bool = False) -> list[str]:
         """Get node IDs belonging to a group.
 
         Args:
@@ -471,6 +496,9 @@ class ThermacellClient:
         status, data = await self._api.get_group_nodes(group_id)
 
         if status != HTTPStatus.OK or data is None:
+            if strict:
+                msg = f"Cannot refresh group members: HTTP {status}"
+                raise DeviceError(msg)
             _LOGGER.warning("Failed to get nodes for group %s: HTTP %d", group_id, status)
             return []
 

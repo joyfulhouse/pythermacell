@@ -20,6 +20,7 @@ Documentation for pythermacell — a Python client for Thermacell IoT devices.
 
 | Document | Description |
 |---|---|
+| [api/NATIVE_SERVICES.md](api/NATIVE_SERVICES.md) | Timers, schedules, timezone, reboot, OTA, and encrypted LAN control |
 | [api/README.md](api/README.md) | ESP RainMaker API overview |
 | [api/DISCOVERED_ENDPOINTS.md](api/DISCOVERED_ENDPOINTS.md) | Complete endpoint catalog |
 | [api/LED_CONTROL.md](api/LED_CONTROL.md) | LED color control and the saturation caveat |

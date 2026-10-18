@@ -24,6 +24,7 @@ from pythermacell.const import (
 from pythermacell.exceptions import InvalidParameterError
 from pythermacell.parsers import get_power_parameter_name, parse_device_state
 from pythermacell.queue import CommandQueue
+from pythermacell.services import HubServices
 
 
 if TYPE_CHECKING:
@@ -127,6 +128,7 @@ class ThermacellDevice:
         """
         self._api = api
         self._state = state
+        self.services = HubServices(api, lambda: self._state)
         self._last_refresh: datetime = datetime.now(UTC)
 
         # Change listeners (callbacks that fire on state updates)
@@ -244,6 +246,11 @@ class ThermacellDevice:
     def refill_life(self) -> float | None:
         """Get refill cartridge life percentage (0-100)."""
         return self._state.params.refill_life
+
+    @property
+    def cartridge_present(self) -> bool | None:
+        """Return cartridge presence separately from percent remaining."""
+        return self._state.params.cartridge_present
 
     @property
     def system_runtime(self) -> int | None:
@@ -571,8 +578,10 @@ class ThermacellDevice:
         Returns:
             True if successful, False otherwise.
         """
-        status, _ = await self._api.update_node_params(self.node_id, cast("dict[str, Any]", params))
-        success = status in (HTTPStatus.OK, HTTPStatus.NO_CONTENT)
+        status, data = await self._api.update_node_params(self.node_id, cast("dict[str, Any]", params))
+        success = status in (HTTPStatus.OK, HTTPStatus.NO_CONTENT) and not (
+            data and data.get("status") in ("failure", "failed", "error")
+        )
 
         if success:
             _LOGGER.debug("Successfully updated device %s params: %s", self.node_id, params)
@@ -599,6 +608,13 @@ class ThermacellDevice:
         Returns:
             True if successful, False otherwise.
         """
+        if self.node_id in self._api.local_transports and (snapshot := await self._api.read_local(self.node_id)):
+            config, params = snapshot
+            await self._update_state(
+                parse_device_state(self.node_id, params, {"connectivity": {"connected": True}}, config)
+            )
+            return True
+
         # Determine which endpoints to fetch
         if skip_config:
             # Lightweight refresh: only params and status (2 API calls)

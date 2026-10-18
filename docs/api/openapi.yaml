@@ -6,8 +6,8 @@ info:
     Thermacell LIV mosquito repeller devices.
 
     This API is based on the ESP RainMaker platform specification and has been
-    validated against the Thermacell LIV Android application (v1.5.0+) and
-    production Home Assistant integration.
+    reviewed against Thermacell LIV Android 4.0.5. New native service and OTA
+    contracts have local HTTP test coverage; physical hub behavior is not verified.
 
     **Base URL**: https://api.iot.thermacell.com
     **OAuth URL**: https://3pauth.iot.thermacell.com
@@ -296,7 +296,7 @@ paths:
                             Enable Repellers: true
                             LED Brightness: 80
                             LED Hue: 240
-                                    Refill Life: 87.5
+                            Refill Life: 87.5
                             System Runtime: 715
                             System Status: 3
                             Error: 0
@@ -506,9 +506,8 @@ paths:
         - HTTP success acknowledges the request; confirm operational status separately
         - Refill Reset selects cartridge type (0=40hr, 1=100hr, 2=180hr)
 
-        **API accepts node_id as either**:
-        - Query parameter: `?node_id=ABCD1234EFGH5678`
-        - In request body (legacy format)
+        **Single node**: use query `?node_id=ABCD1234EFGH5678` with a parameter object.
+        **Multiple nodes**: omit the query and send an array of node_id/payload objects.
 
       operationId: updatenodestate
       security:
@@ -517,7 +516,7 @@ paths:
         - $ref: '#/components/parameters/ApiVersion'
         - name: node_id
           in: query
-          description: node id (optional if provided in request body)
+          description: Required for a single-node object; omitted for the bulk array
           required: false
           schema:
             type: string
@@ -527,7 +526,17 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/NodeParameterUpdate"
+              oneOf:
+                - $ref: "#/components/schemas/NodeParameterUpdate"
+                - type: array
+                  items:
+                    type: object
+                    required: [node_id, payload]
+                    properties:
+                      node_id:
+                        type: string
+                      payload:
+                        type: object
             examples:
               turnOn:
                 summary: Turn device on
@@ -606,6 +615,84 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+
+  /{version}/user/nodes/ota_update:
+    parameters:
+      - $ref: '#/components/parameters/ApiVersion'
+    get:
+      summary: Check firmware offered for a node
+      operationId: checkFirmwareUpdate
+      security:
+        - AccessToken: []
+      parameters:
+        - $ref: '#/components/parameters/NodeId'
+      responses:
+        '200':
+          description: Firmware offer from the cloud
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ota_available]
+                properties:
+                  ota_available:
+                    type: boolean
+                  fw_version:
+                    type: string
+                  ota_job_id:
+                    type: string
+                  description:
+                    type: string
+                  status:
+                    type: string
+    post:
+      summary: Install an offered node-specific OTA job
+      operationId: installFirmwareUpdate
+      security:
+        - AccessToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [node_id, ota_job_id]
+              properties:
+                node_id:
+                  type: string
+                ota_job_id:
+                  type: string
+      responses:
+        '200':
+          description: Request acknowledged; poll ota_status for completion
+  /{version}/user/nodes/ota_status:
+    get:
+      summary: Read the stage of an OTA job
+      operationId: getFirmwareUpdateStatus
+      security:
+        - AccessToken: []
+      parameters:
+        - $ref: '#/components/parameters/ApiVersion'
+        - $ref: '#/components/parameters/NodeId'
+        - name: ota_job_id
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Server-reported stage; no numeric progress guarantee
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  additional_info:
+                    type: string
+                  timestamp:
+                    type: integer
 
 components:
   securitySchemes:
@@ -867,9 +954,9 @@ components:
             Refill Life:
               type: number
               format: float
-              minimum: 0
+              minimum: -1
               maximum: 100
-              description: Remaining refill cartridge life percentage
+              description: Remaining percentage; -1 means missing cartridge
               example: 87.5
             System Runtime:
               type: integer

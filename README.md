@@ -60,7 +60,7 @@ async def main() -> None:
             print(f"{device.name} ({device.model}) online={device.is_online}")
 
             await device.turn_on()
-            await device.set_led_color(hue=120, saturation=100, brightness=80)
+            await device.set_led_color(hue=120, brightness=80)
 
             print(f"Refill life: {device.refill_life}%")
 
@@ -79,7 +79,7 @@ immediately, then the API call runs in the background and rolls back on failure)
 device = (await client.get_devices())[0]
 
 await device.turn_on()                              # power on (optimistic)
-await device.set_led_color(hue=240, saturation=100, brightness=80)  # blue
+await device.set_led_color(hue=240, brightness=80)  # blue
 await device.refresh()                              # pull latest state from API
 
 print(device.is_powered_on, device.refill_life, device.system_status)
@@ -166,3 +166,7 @@ the property of their respective owners.
 [kofi]: https://ko-fi.com/bryanli
 [omnigent-shield]: https://raw.githubusercontent.com/joyfulhouse/.github/main/assets/badges/built-with-omnigent.svg
 [omnigent]: https://github.com/omnigent-ai/omnigent
+
+## Native Services and LAN Control
+
+Version 0.3.0b1 adds capability-driven timers, schedules, reboot, timezone, cloud OTA, and encrypted RainMaker local transport. See [verified contracts and examples](docs/api/NATIVE_SERVICES.md). This beta is validated against HTTP/protocol simulators; live hub validation remains outstanding.
