@@ -296,8 +296,7 @@ paths:
                             Enable Repellers: true
                             LED Brightness: 80
                             LED Hue: 240
-                            LED Saturation: 100
-                            Refill Life: 87.5
+                                    Refill Life: 87.5
                             System Runtime: 715
                             System Status: 3
                             Error: 0
@@ -499,14 +498,13 @@ paths:
 
         **Color Control**:
         - Hue: 0-360 (HSV color wheel)
-        - Saturation: 0-100 (color intensity)
         - Brightness: 0-100 (LED brightness)
 
         **Important Notes**:
         - Only include parameters you want to change
         - LED is only "on" when hub is powered AND brightness > 0
-        - Parameters are applied immediately
-        - Refill Reset uses a counter value (1 to trigger reset)
+        - HTTP success acknowledges the request; confirm operational status separately
+        - Refill Reset selects cartridge type (0=40hr, 1=100hr, 2=180hr)
 
         **API accepts node_id as either**:
         - Query parameter: `?node_id=ABCD1234EFGH5678`
@@ -546,7 +544,6 @@ paths:
                 value:
                   LIV Hub:
                     LED Hue: 240
-                    LED Saturation: 100
                     LED Brightness: 80
               setLEDBrightness:
                 summary: Set LED brightness to 50%
@@ -570,7 +567,6 @@ paths:
                     Enable Repellers: true
                     LED Brightness: 100
                     LED Hue: 120
-                    LED Saturation: 100
       responses:
         '200':
           description: success if node_id provided as a query parameter
@@ -878,7 +874,7 @@ components:
             System Runtime:
               type: integer
               minimum: 0
-              description: Current session runtime in minutes
+              description: Raw hub runtime in tenths of an hour (multiply by 6 for minutes)
               example: 715
             System Status:
               type: integer
@@ -916,15 +912,10 @@ components:
               minimum: 0
               maximum: 360
               description: Set LED hue in HSV color space
-            LED Saturation:
-              type: integer
-              minimum: 0
-              maximum: 100
-              description: Set LED saturation in HSV color space
             Refill Reset:
               type: integer
-              enum: [1]
-              description: Reset refill life counter to 100% (set to 1 to trigger)
+              enum: [0, 1, 2]
+              description: Reset cartridge life (0=40hr yellow, 1=100hr blue, 2=180hr gray)
 
 security:
   - AccessToken: []

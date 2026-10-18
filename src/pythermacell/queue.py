@@ -185,7 +185,9 @@ class CommandQueue:
                     old_future: asyncio.Future[bool] = captured_old_future,
                 ) -> None:
                     if not old_future.done():
-                        if f.exception():
+                        if f.cancelled():
+                            old_future.cancel()
+                        elif f.exception():
                             old_future.set_exception(f.exception())  # type: ignore[arg-type]
                         else:
                             old_future.set_result(f.result())
@@ -271,6 +273,8 @@ class CommandQueue:
 
     async def _execute_command(self, command: QueuedCommand) -> None:
         """Execute a single command and resolve its future."""
+        if command.future.cancelled():
+            return
         try:
             _LOGGER.debug("Executing %s command: %s", command.command_type, command.params)
             result = await command.execute_fn()

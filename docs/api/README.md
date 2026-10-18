@@ -88,7 +88,7 @@ curl -X PUT "https://api.iot.thermacell.com/v1/user/nodes/params?node_id=NODE_ID
 
 | Parameter | Type | Range | Description | Notes |
 |-----------|------|-------|-------------|-------|
-| `Enable Repellers` | boolean | true/false | Turn device on/off | Use this, not "Power" |
+| `Enable Repellers` | boolean | true/false | Turn device on/off | Legacy fallback; use writable esp.param.power metadata |
 | `LED Brightness` | integer | 0-100 | LED brightness percentage | 0=off, 100=max |
 | `LED Hue` | integer | 0-360 | LED color (HSV hue) | 0=red, 120=green, 240=blue |
 | ~~`LED Saturation`~~ | ~~integer~~ | ~~0-100~~ | ~~LED color saturation~~ | ⚠️ **DO NOT USE - CAUSES CRASHES** |
@@ -98,7 +98,7 @@ curl -X PUT "https://api.iot.thermacell.com/v1/user/nodes/params?node_id=NODE_ID
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `Power` | boolean | Device power status indicator (read-only) |
+| `Power` | boolean | Power parameter; writability depends on config metadata |
 | `LED Power` | boolean | LED power status (derived from brightness) |
 | `System Runtime` | integer | Current session runtime (minutes) |
 | `System Status` | integer | 1=Off, 2=Warming, 3=Protected |
@@ -120,8 +120,8 @@ See [LED_CONTROL.md](LED_CONTROL.md) for comprehensive details based on:
 
 ### Parameter Naming
 - **Control parameter**: `"Enable Repellers"` (read/write)
-- **Status parameter**: `"Power"` (read-only)
-- Control device using `"Enable Repellers"`, not `"Power"`
+- Resolve the writable `esp.param.power` name from node config; older hubs use `"Enable Repellers"`.
+- Home Assistant requests verified power control; HTTP acknowledgement alone does not confirm that the hub stopped.
 
 ### LED State Logic
 LED is only "on" when:

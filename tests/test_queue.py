@@ -538,3 +538,17 @@ class TestCommandQueueIntegration:
         assert executed["color"] == 1
 
         await queue.shutdown()
+
+
+async def test_cancelled_pending_command_is_not_sent() -> None:
+    """An expired request must not execute later and unexpectedly toggle power."""
+    from datetime import UTC, datetime
+
+    queue = CommandQueue(min_interval=60, command_timeout=0.01)
+    queue._last_execute_time = datetime.now(UTC)
+    execute = AsyncMock(return_value=True)
+    with pytest.raises(TimeoutError):
+        await queue.enqueue("power", {"on": True}, execute)
+    await queue.flush()
+    execute.assert_not_awaited()
+    await queue.shutdown()

@@ -90,7 +90,7 @@ async def set_led_power(self, power_on: bool) -> bool:
 
 ### Set LED Color (Hue + Brightness)
 
-**Endpoint**: `PUT /v1/user/nodes/params?nodeid={node_id}`
+**Endpoint**: `PUT /v1/user/nodes/params?node_id={node_id}`
 
 **Request Body** (CORRECT):
 ```json

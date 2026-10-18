@@ -60,7 +60,7 @@ def app() -> Application:
 
     async def get_params(request: web.Request) -> web.Response:
         """Mock /v1/user/nodes/params endpoint."""
-        node_id = request.query.get("nodeid")
+        node_id = request.query.get("node_id")
         if node_id == "nonexistent":
             return web.Response(status=HTTPStatus.NOT_FOUND)
         return web.json_response(SAMPLE_PARAMS_RESPONSE)
@@ -71,7 +71,7 @@ def app() -> Application:
 
     async def get_config(request: web.Request) -> web.Response:
         """Mock /v1/user/nodes/config endpoint."""
-        node_id = request.query.get("nodeid")
+        node_id = request.query.get("node_id")
         config = SAMPLE_CONFIG_RESPONSE.copy()
         config["node_id"] = node_id or "node1"
         if node_id == "node2":
@@ -285,7 +285,7 @@ class TestClientGetDevice:
 
         async def count_config(request: web.Request) -> web.Response:
             call_counts["config"] += 1
-            node_id = request.query.get("nodeid")
+            node_id = request.query.get("node_id")
             config = SAMPLE_CONFIG_RESPONSE.copy()
             config["node_id"] = node_id or "node1"
             return web.json_response(config)
@@ -342,7 +342,7 @@ class TestClientGetDevice:
 
         async def count_config(request: web.Request) -> web.Response:
             call_counts["config"] += 1
-            node_id = request.query.get("nodeid")
+            node_id = request.query.get("node_id")
             config = SAMPLE_CONFIG_RESPONSE.copy()
             config["node_id"] = node_id or "node1"
             return web.json_response(config)
@@ -399,7 +399,7 @@ class TestClientGetDevice:
 
         async def count_config(request: web.Request) -> web.Response:
             call_counts["config"] += 1
-            node_id = request.query.get("nodeid")
+            node_id = request.query.get("node_id")
             config = SAMPLE_CONFIG_RESPONSE.copy()
             config["node_id"] = node_id or "node1"
             return web.json_response(config)
@@ -456,7 +456,7 @@ class TestClientGetDevice:
 
         async def count_config(request: web.Request) -> web.Response:
             call_counts["config"] += 1
-            node_id = request.query.get("nodeid")
+            node_id = request.query.get("node_id")
             config = SAMPLE_CONFIG_RESPONSE.copy()
             config["node_id"] = node_id or "node1"
             return web.json_response(config)

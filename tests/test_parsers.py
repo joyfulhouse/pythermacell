@@ -433,3 +433,22 @@ class TestHasErrorBitfield:
         """Error=0 and a missing Error key both leave has_error False."""
         assert self._state_with_error(0).has_error is False
         assert self._state_with_error(None).has_error is False  # "Error" key omitted
+
+
+def test_config_power_name_is_used_for_reading() -> None:
+    """The name resolved for power writes must also be used on refresh."""
+    state = parse_device_state(
+        "test-hub",
+        {"LIV Hub": {"Power": True, "LED Brightness": 50}},
+        {"connectivity": {"connected": True}},
+        {
+            "devices": [
+                {
+                    "name": "LIV Hub",
+                    "params": [{"name": "Power", "type": "esp.param.power", "properties": ["read", "write"]}],
+                }
+            ]
+        },
+    )
+    assert state.is_powered_on
+    assert state.params.led_power

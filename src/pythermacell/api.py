@@ -260,7 +260,7 @@ class ThermacellAPI:
                 if response.status in (HTTPStatus.OK, HTTPStatus.CREATED, HTTPStatus.NO_CONTENT):
                     # Check content-type with substring match to handle charset parameters
                     # e.g., "application/json; charset=utf-8"
-                    if "application/json" in response.content_type:
+                    if response.status != HTTPStatus.NO_CONTENT and "application/json" in response.content_type:
                         response_data = await response.json()
                     else:
                         response_data = {}
@@ -298,7 +298,7 @@ class ThermacellAPI:
             Tuple of (status_code, response_data) where response_data has format:
             {"LIV Hub": {"Power": bool, "LED Brightness": int, ...}}
         """
-        return await self.request("GET", "/user/nodes/params", params={"nodeid": node_id})
+        return await self.request("GET", "/user/nodes/params", params={"node_id": node_id})
 
     async def get_node_status(self, node_id: str) -> tuple[int, dict[str, Any] | None]:
         """Get device connectivity status.
@@ -310,7 +310,7 @@ class ThermacellAPI:
             Tuple of (status_code, response_data) where response_data has format:
             {"connectivity": {"connected": bool, ...}}
         """
-        return await self.request("GET", "/user/nodes/status", params={"nodeid": node_id})
+        return await self.request("GET", "/user/nodes/status", params={"node_id": node_id})
 
     async def get_node_config(self, node_id: str) -> tuple[int, dict[str, Any] | None]:
         """Get device configuration (model, firmware, serial number).
@@ -323,7 +323,7 @@ class ThermacellAPI:
             {"info": {"name": str, "type": str, "fw_version": str, ...},
              "devices": [{"serial_num": str, ...}]}
         """
-        return await self.request("GET", "/user/nodes/config", params={"nodeid": node_id})
+        return await self.request("GET", "/user/nodes/config", params={"node_id": node_id})
 
     async def update_node_params(
         self,
@@ -343,7 +343,7 @@ class ThermacellAPI:
         return await self.request(
             "PUT",
             "/user/nodes/params",
-            params={"nodeid": node_id},
+            params={"node_id": node_id},
             json_data=params,
         )
 

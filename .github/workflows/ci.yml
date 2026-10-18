@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      run_integration_tests:
+        description: 'Run hardware tests (toggles real hubs and resets refill usage)'
+        required: false
+        type: boolean
+        default: false
 
 # Cancel in-progress runs for the same workflow + branch/PR
 concurrency:
@@ -102,12 +108,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: [lint, test]
-    # Skip integration tests for Dependabot PRs and fork PRs (they don't have access to secrets)
-    if: |
-      (github.event_name == 'pull_request' &&
-       github.actor != 'dependabot[bot]' &&
-       github.event.pull_request.head.repo.full_name == github.repository) ||
-      github.ref == 'refs/heads/main'
+    # Hardware tests mutate real hubs, including resetting cartridge usage.
+    if: github.event_name == 'workflow_dispatch' && inputs.run_integration_tests
     environment: integration-tests
     steps:
       - uses: actions/checkout@v7

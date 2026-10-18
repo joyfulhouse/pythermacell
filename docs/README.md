@@ -26,6 +26,7 @@ Documentation for pythermacell — a Python client for Thermacell IoT devices.
 | [api/GROUPS_API.md](api/GROUPS_API.md) | Device grouping functionality |
 | [api/OTA_UPDATE_ENDPOINTS.md](api/OTA_UPDATE_ENDPOINTS.md) | Over-the-air firmware updates |
 | [api/openapi.yaml](api/openapi.yaml) | OpenAPI specification |
+| [api/APK_AUDIT_2026-10-18.md](api/APK_AUDIT_2026-10-18.md) | Android 4.0.5 API audit, refill fixes, and hardware verification |
 
 ## Testing
 
