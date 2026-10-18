@@ -130,7 +130,7 @@ Authorization: {access_token}
 **Usage**:
 This endpoint returns only node IDs. To get full device details or control devices:
 1. Call this endpoint to get node IDs
-2. For each node ID, call `/v1/user/nodes/params?nodeid={node_id}` (for state)
+2. For each node ID, call `/v1/user/nodes/params?node_id={node_id}` (for state)
 3. Or use the existing `client.get_devices()` and filter by group membership
 
 ---

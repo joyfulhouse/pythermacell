@@ -476,3 +476,93 @@ class TestDeviceRepresentation:
 
         assert "ThermacellDevice" in result
         assert "test-node-123" in result
+
+
+@pytest.mark.parametrize("command", ["turn_off", "set_led_brightness", "set_led_color", "reset_refill"])
+@pytest.mark.parametrize("failure", [False, True])
+async def test_failed_command_restores_state(
+    device: ThermacellDevice, mock_api: ThermacellAPI, command: str, failure: bool
+) -> None:
+    """A rejected request or network exception cannot leave a fictitious state."""
+    from dataclasses import replace
+
+    before = replace(device._state.params)
+    mock_api.update_node_params.return_value = (HTTPStatus.BAD_REQUEST, None)
+    if failure:
+        mock_api.update_node_params.side_effect = TimeoutError("Hub did not respond")
+    args = {"turn_off": (), "set_led_brightness": (0,), "set_led_color": (20, 10), "reset_refill": (2,)}
+    if failure:
+        with pytest.raises(TimeoutError):
+            await getattr(device, command)(*args[command])
+    else:
+        assert await getattr(device, command)(*args[command]) is False
+    assert device._state.params == before
+
+
+@pytest.mark.parametrize("refill_type", [0, 1, 2])
+async def test_reset_refill_type_payload(device: ThermacellDevice, mock_api: ThermacellAPI, refill_type: int) -> None:
+    """Each cartridge uses its integer code without any power write."""
+    assert await device.reset_refill(refill_type)
+    mock_api.update_node_params.assert_awaited_once_with(device.node_id, {"LIV Hub": {"Refill Reset": refill_type}})
+
+
+@pytest.mark.parametrize("refill_type", [True, False, 1.0, -1, 3, "1"])
+async def test_invalid_refill_type_does_not_write(
+    device: ThermacellDevice, mock_api: ThermacellAPI, refill_type: object
+) -> None:
+    """Reject booleans and floats that compare equal to valid integer codes."""
+    with pytest.raises(InvalidParameterError):
+        await device.reset_refill(refill_type)  # type: ignore[arg-type]
+    mock_api.update_node_params.assert_not_awaited()
+
+
+async def test_off_confirmation_waits_for_reported_off(device: ThermacellDevice, mock_api: ThermacellAPI) -> None:
+    """The writable flag alone cannot confirm off while the system is active."""
+    from unittest.mock import patch
+
+    mock_api.get_node_params.side_effect = [
+        (HTTPStatus.OK, {"LIV Hub": {"Enable Repellers": False, "System Status": 3}}),
+        (HTTPStatus.OK, {"LIV Hub": {"Enable Repellers": False, "System Status": 1}}),
+    ]
+    with patch("pythermacell.devices.asyncio.sleep", new_callable=AsyncMock):
+        assert await device.set_power(False, verify=True)
+    assert mock_api.get_node_params.await_count == 2
+
+
+async def test_unconfirmed_off_fails(device: ThermacellDevice, mock_api: ThermacellAPI) -> None:
+    """Cloud success with a still-running hub is a failed off command."""
+    from unittest.mock import patch
+
+    mock_api.get_node_params.return_value = (
+        HTTPStatus.OK,
+        {"LIV Hub": {"Enable Repellers": False, "System Status": 3}},
+    )
+    with patch("pythermacell.devices.asyncio.sleep", new_callable=AsyncMock):
+        assert not await device.set_power(False, verify=True)
+    assert mock_api.get_node_params.await_count == 6
+    assert device.is_powered_on
+
+
+async def test_config_advertised_power_parameter(device: ThermacellDevice, mock_api: ThermacellAPI) -> None:
+    """Match the app's parameter-type lookup instead of assuming a field name."""
+    device._state.raw_data["config"] = {
+        "devices": [
+            {
+                "name": "LIV Hub",
+                "params": [{"name": "Power", "type": "esp.param.power", "properties": ["read", "write"]}],
+            }
+        ]
+    }
+    mock_api.get_node_params.return_value = (HTTPStatus.OK, {"LIV Hub": {"Power": False, "System Status": 1}})
+    assert await device.set_power(False, verify=True)
+    mock_api.update_node_params.assert_awaited_once_with(device.node_id, {"LIV Hub": {"Power": False}})
+
+
+async def test_confirmation_network_failure_restores_power(device: ThermacellDevice, mock_api: ThermacellAPI) -> None:
+    """An accepted PUT followed by a failed GET must not leave optimistic off."""
+    from aiohttp import ClientConnectionError
+
+    mock_api.get_node_params.side_effect = ClientConnectionError("Disconnected")
+    with pytest.raises(ClientConnectionError):
+        await device.set_power(False, verify=True)
+    assert device.is_powered_on

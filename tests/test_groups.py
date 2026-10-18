@@ -429,7 +429,7 @@ class TestClientGroupMethods:
             return web.json_response({"connectivity": {"connected": True}})
 
         async def get_config(request: web.Request) -> web.Response:
-            node_id = request.query.get("nodeid", "node-1")
+            node_id = request.query.get("node_id", "node-1")
             return web.json_response(
                 {
                     "node_id": node_id,
@@ -505,7 +505,7 @@ class TestClientGroupMethods:
 
         async def count_config(request: web.Request) -> web.Response:
             call_counts["config"] += 1
-            node_id = request.query.get("nodeid", "node-1")
+            node_id = request.query.get("node_id", "node-1")
             return web.json_response(
                 {
                     "node_id": node_id,

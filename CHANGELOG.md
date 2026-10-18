@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-10-18
+
+### Fixed
+- Match Android 4.0.5 device queries using `node_id` and discover the writable
+  power parameter from config metadata.
+- Add optional `set_power(..., verify=True)` confirmation against reported power
+  and system status; restore optimistic state on errors and cancellation.
+- Skip cancelled queued commands and propagate coalesced cancellation correctly.
+- Handle JSON-typed bodyless 204 responses and reject non-integer refill codes.
+- Run hardware integration tests only through explicit workflow dispatch; ordinary
+  release and pull-request checks no longer toggle hubs or reset cartridge usage.
+
+### Documentation
+- Add the Android/refill audit and correct refill, LED-write, and runtime schemas.
+
 ## [0.2.6] - 2026-09-13
 
 ### Fixed

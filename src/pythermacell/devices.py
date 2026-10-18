@@ -22,7 +22,7 @@ from pythermacell.const import (
     LED_HUE_MIN,
 )
 from pythermacell.exceptions import InvalidParameterError
-from pythermacell.parsers import parse_device_state
+from pythermacell.parsers import get_power_parameter_name, parse_device_state
 from pythermacell.queue import CommandQueue
 
 
@@ -291,16 +291,18 @@ class ThermacellDevice:
         """
         return await self.set_power(False)
 
-    async def set_power(self, power_on: bool) -> bool:
+    async def set_power(self, power_on: bool, *, verify: bool = False) -> bool:
         """Set device power state with optimistic update.
 
         Args:
             power_on: True to turn on, False to turn off.
+            verify: Poll reported parameters to confirm the command took effect.
 
         Returns:
             True if successful, False otherwise.
         """
         # Save old state for reversion
+        old_power = self._state.params.power
         old_enable_repellers = self._state.params.enable_repellers
         old_led_power = self._state.params.led_power
 
@@ -317,27 +319,67 @@ class ThermacellDevice:
 
         # Define the API call
         async def execute() -> bool:
-            params: dict[str, dict[str, int | float | bool]] = {DEVICE_TYPE_LIV_HUB: {"Enable Repellers": power_on}}
+            params: dict[str, dict[str, int | float | bool]] = {
+                DEVICE_TYPE_LIV_HUB: {self._power_parameter_name(): power_on}
+            }
             return await self._update_params(params)
 
-        # Execute via queue (with coalescing) or directly
-        if self._command_queue is not None:
-            success = await self._command_queue.enqueue(
-                command_type="power",
-                params={"power_on": power_on},
-                execute_fn=execute,
-            )
-        else:
-            success = await execute()
-
-        # Revert on failure
-        if not success:
-            self._state.params.enable_repellers = old_enable_repellers
-            self._state.params.power = old_enable_repellers
-            self._state.params.led_power = old_led_power
-            self._notify_listeners()  # Notify of reversion
+        success = False
+        try:
+            # Execute via queue (with coalescing) or directly
+            if self._command_queue is not None:
+                success = await self._command_queue.enqueue(
+                    command_type="power",
+                    params={"power_on": power_on},
+                    execute_fn=execute,
+                )
+            else:
+                success = await execute()
+            if success and verify:
+                success = False
+                success = await self._confirm_power(power_on)
+        finally:
+            if not success:
+                self._state.params.enable_repellers = old_enable_repellers
+                self._state.params.power = old_power
+                self._state.params.led_power = old_led_power
+                self._notify_listeners()  # Notify of reversion
 
         return success
+
+    def _power_parameter_name(self) -> str:
+        """Use the advertised writable power parameter, as the Android app does."""
+        return get_power_parameter_name(self._state.raw_data.get("config", {}))
+
+    async def _confirm_power(self, power_on: bool) -> bool:
+        """Confirm reported power and operational status with bounded polling.
+
+        A cloud acknowledgement alone does not confirm that the hub stopped.
+        Delays match the Android PowerStateCoordinator reconciliation schedule.
+        """
+        power_param = self._power_parameter_name()
+        try:
+            async with asyncio.timeout(20):
+                for delay in (0, 0.5, 1, 2, 4, 5):
+                    if delay:
+                        await asyncio.sleep(delay)
+                    status, data = await self._api.get_node_params(self.node_id)
+                    if status != HTTPStatus.OK or data is None:
+                        continue
+                    hub = data.get(DEVICE_TYPE_LIV_HUB, {})
+                    if hub.get(power_param) is not power_on:
+                        continue
+                    states = [hub[key] for key in ("System State", "System Status") if key in hub]
+                    if power_on:
+                        confirmed = not states or any(state in (2, 3) for state in states)
+                    else:
+                        confirmed = all(state == 1 for state in states)
+                    if confirmed:
+                        return True
+        except TimeoutError:
+            _LOGGER.warning("Timed out confirming device %s power", self.node_id)
+        _LOGGER.warning("Device %s did not confirm power=%s", self.node_id, power_on)
+        return False
 
     async def set_led_power(self, power_on: bool) -> bool:
         """Set LED power state.
@@ -390,21 +432,22 @@ class ThermacellDevice:
             params: dict[str, dict[str, int | float | bool]] = {DEVICE_TYPE_LIV_HUB: {"LED Brightness": brightness}}
             return await self._update_params(params)
 
-        # Execute via queue (with coalescing) or directly
-        if self._command_queue is not None:
-            success = await self._command_queue.enqueue(
-                command_type="led_brightness",
-                params={"brightness": brightness},
-                execute_fn=execute,
-            )
-        else:
-            success = await execute()
-
-        # Revert on failure
-        if not success:
-            self._state.params.led_brightness = old_brightness
-            self._state.params.led_power = old_led_power
-            self._notify_listeners()
+        success = False
+        try:
+            # Execute via queue (with coalescing) or directly
+            if self._command_queue is not None:
+                success = await self._command_queue.enqueue(
+                    command_type="led_brightness",
+                    params={"brightness": brightness},
+                    execute_fn=execute,
+                )
+            else:
+                success = await execute()
+        finally:
+            if not success:
+                self._state.params.led_brightness = old_brightness
+                self._state.params.led_power = old_led_power
+                self._notify_listeners()
 
         return success
 
@@ -461,22 +504,23 @@ class ThermacellDevice:
             }
             return await self._update_params(params)
 
-        # Execute via queue (with coalescing) or directly
-        if self._command_queue is not None:
-            success = await self._command_queue.enqueue(
-                command_type="led_color",
-                params={"hue": hue, "brightness": brightness},
-                execute_fn=execute,
-            )
-        else:
-            success = await execute()
-
-        # Revert on failure
-        if not success:
-            self._state.params.led_hue = old_hue
-            self._state.params.led_brightness = old_brightness
-            self._state.params.led_power = old_led_power
-            self._notify_listeners()
+        success = False
+        try:
+            # Execute via queue (with coalescing) or directly
+            if self._command_queue is not None:
+                success = await self._command_queue.enqueue(
+                    command_type="led_color",
+                    params={"hue": hue, "brightness": brightness},
+                    execute_fn=execute,
+                )
+            else:
+                success = await execute()
+        finally:
+            if not success:
+                self._state.params.led_hue = old_hue
+                self._state.params.led_brightness = old_brightness
+                self._state.params.led_power = old_led_power
+                self._notify_listeners()
 
         return success
 
@@ -495,7 +539,7 @@ class ThermacellDevice:
         Raises:
             InvalidParameterError: If refill_type is not 0, 1, or 2.
         """
-        if refill_type not in (0, 1, 2):
+        if type(refill_type) is not int or refill_type not in (0, 1, 2):
             msg = f"Refill type must be 0 (40hr), 1 (100hr), or 2 (180hr), got {refill_type}"
             raise InvalidParameterError(msg, parameter_name="refill_type", value=refill_type)
 
@@ -508,12 +552,13 @@ class ThermacellDevice:
 
         # Use "Refill Reset" parameter with cartridge type value
         params: dict[str, dict[str, int | float | bool]] = {DEVICE_TYPE_LIV_HUB: {"Refill Reset": refill_type}}
-        success = await self._update_params(params)
-
-        # Revert on failure
-        if not success:
-            self._state.params.refill_life = old_refill_life
-            self._notify_listeners()
+        success = False
+        try:
+            success = await self._update_params(params)
+        finally:
+            if not success:
+                self._state.params.refill_life = old_refill_life
+                self._notify_listeners()
 
         return success
 

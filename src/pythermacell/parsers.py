@@ -20,12 +20,25 @@ __all__ = [
 ]
 
 
-def parse_device_params(data: dict[str, Any]) -> DeviceParams:
+def get_power_parameter_name(config: dict[str, Any]) -> str:
+    """Resolve the hub's writable power parameter from RainMaker metadata."""
+    for device in config.get("devices", []):
+        if device.get("name") != DEVICE_TYPE_LIV_HUB:
+            continue
+        for param in device.get("params", []):
+            if param.get("type") == "esp.param.power" and "write" in param.get("properties", []):
+                name = param.get("name")
+                if isinstance(name, str) and name:
+                    return name
+    return "Enable Repellers"
+
+
+def parse_device_params(data: dict[str, Any], config: dict[str, Any] | None = None) -> DeviceParams:
     """Parse device parameters from API response.
 
-    The Thermacell API has two power-related fields:
-    - "Power": Read-only status indicator (not used for control)
-    - "Enable Repellers": Writable control parameter (actual device power)
+    The writable power field is resolved by esp.param.power metadata in the
+    node configuration. Older hubs use "Enable Repellers"; other firmware can
+    advertise "Power" as writable. Without config, use the legacy field.
 
     LED state logic: The LED is only considered "on" when BOTH conditions are met:
     1. Device is powered on (enable_repellers=True)
@@ -37,14 +50,15 @@ def parse_device_params(data: dict[str, Any]) -> DeviceParams:
     Args:
         data: Raw parameter data from API in format:
               {"LIV Hub": {"Power": bool, "LED Brightness": int, ...}}
+        config: Optional node config used to resolve the writable power field.
 
     Returns:
         DeviceParams instance with parsed and calculated state.
     """
     hub_params = data.get(DEVICE_TYPE_LIV_HUB, {})
 
-    # Use "Enable Repellers" for device power (not "Power" which is read-only)
-    enable_repellers = hub_params.get("Enable Repellers")
+    # Read the same config-advertised field used for power writes.
+    enable_repellers = hub_params.get(get_power_parameter_name(config or {}))
     brightness = hub_params.get("LED Brightness", 0)
 
     # Calculate LED power state: only "on" when hub powered AND brightness > 0
@@ -155,7 +169,7 @@ def parse_device_state(
     return DeviceState(
         info=parse_device_info(node_id, config_data, params_data),
         status=parse_device_status(node_id, status_data),
-        params=parse_device_params(params_data),
+        params=parse_device_params(params_data, config_data),
         raw_data={
             "params": params_data,
             "status": status_data,
