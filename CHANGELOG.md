@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Opt-in LAN diagnostic with independent discovery/authentication/identity/read
+  reporting, redacted artifacts, process-scoped cloud denial, and an explicit
+  LED brightness write mode with verified finally restoration (Refs #72).
+- Document live firmware 5.4.7 results for ADU/Pool: no advertised local-control
+  metadata or matching mDNS endpoint; no live local reads or writes claimed.
+
 ## [0.3.0b3] - 2026-10-18
 
 ### Fixed
