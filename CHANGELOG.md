@@ -15,15 +15,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   metadata or matching mDNS endpoint; no live local reads or writes claimed.
 
 ### Fixed
-- Keep LED restoration shielded through repeated cancellation and verify unchanged
-  state without writing after a rejected command.
+- Keep LED restoration shielded through repeated cancellation; always write the
+  original brightness and verify it, including after HTTP/protocol errors that
+  may follow a dispatched change.
 - Fail closed on diagnostic output errors and known credential leaks; validate
   metadata, explain missing prerequisites safely, and summarize text artifacts.
 - Preserve IPv6 interface scopes under process cloud denial and try alternative
   discovered addresses for reads without retrying writes on another endpoint.
 - Preserve restoration-failure exit status across interrupts and report refusals;
-  retain safe stage-status stubs and restore after uncertain writes even when an
-  initial read is unchanged. Remove private ID-token capture from the diagnostic.
+  retain safe stage-status stubs. Remove private ID-token capture from the diagnostic.
 
 ## [0.3.0b4] - 2026-10-19
 

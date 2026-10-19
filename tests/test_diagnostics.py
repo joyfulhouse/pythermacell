@@ -83,9 +83,10 @@ class DiagnosticPeer(HubPeer):
             assert packet.msg == 6
             payload = json.loads(packet.cmd_set_prop_vals.props[0].value)
             self.writes.append(payload)
-            self.params["LIV Hub"].update(payload["LIV Hub"])
             reply.msg = 7
-            reply.resp_set_prop_vals.status = 0
+            reply.resp_set_prop_vals.status = int(self.reject and payload["LIV Hub"]["LED Brightness"] != 75)
+            if not reply.resp_set_prop_vals.status:
+                self.params["LIV Hub"].update(payload["LIV Hub"])
         return web.Response(body=reply.SerializeToString())
 
 
@@ -148,7 +149,7 @@ async def test_unsafe_or_unsupported_nodes_never_write(diagnostic_peer: Any, fai
     report = await diagnose(peer, record, services, write=True)
     assert not peer.writes
     assert report["stages"]["led_write"]["status"] != "passed"
-    assert report["stages"]["restore"]["status"] == ("verified_unchanged" if failure == "readonly" else "not_performed")
+    assert report["stages"]["restore"]["status"] == ("RESTORE_FAILED" if failure == "readonly" else "not_performed")
     if failure == "identity":
         assert report["stages"]["handshake"]["status"] == "passed"
         assert report["stages"]["identity"]["status"] == "failed"
@@ -365,7 +366,7 @@ async def test_rejected_write_continues_to_next_hub(
     diagnostic_peer: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     peer, record, services = diagnostic_peer
-    peer.readonly = True
+    peer.reject = True
     monkeypatch.setattr(
         diagnostics,
         "account_nodes",
@@ -374,7 +375,8 @@ async def test_rejected_write_continues_to_next_hub(
     monkeypatch.setattr(diagnostics, "discover", AsyncMock(return_value=[record]))
     args = argparse.Namespace(output=tmp_path, discovery_seconds=1, node_id=None, write_led=True, deny_cloud=False)
     assert await diagnostics.run(args) == 2
-    assert not peer.writes
+    assert peer.writes == [{"LIV Hub": {"LED Brightness": 74}}, {"LIV Hub": {"LED Brightness": 75}}] * 2
+    assert peer.params["LIV Hub"]["LED Brightness"] == 75
     assert "RESTORE_FAILED" not in capsys.readouterr().err
 
     def reports() -> list[dict[str, Any]]:
@@ -382,7 +384,7 @@ async def test_rejected_write_continues_to_next_hub(
 
     saved = await asyncio.to_thread(reports)
     assert len(saved) == 2
-    assert all(report["stages"]["restore"]["status"] == "verified_unchanged" for report in saved)
+    assert all(report["stages"]["restore"]["status"] == "passed" for report in saved)
 
 
 async def test_interrupted_restore_reports_exact_originals(capsys: pytest.CaptureFixture[str]) -> None:
@@ -544,20 +546,6 @@ async def test_address_preference_ipv4_global_ipv6_then_link_local(
     assert [call.args[1].host for call in factory.call_args_list] == ["203.0.113.1", "2001:db8::1", "fe80::1234%2"]
 
 
-async def test_verified_unchanged_restore_counts_as_success(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(diagnostics, "account_nodes", AsyncMock(return_value=[("hub", {}, {}, None)]))
-    monkeypatch.setattr(diagnostics, "discover", AsyncMock(return_value=[]))
-
-    async def unchanged(*args: Any, **kwargs: Any) -> None:
-        for name in ("handshake", "identity", "properties", "led_write", "led_readback"):
-            diagnostics.stage(kwargs["report"], name, "passed")
-        diagnostics.stage(kwargs["report"], "restore", "verified_unchanged")
-
-    monkeypatch.setattr(diagnostics, "diagnose_node", unchanged)
-    args = argparse.Namespace(output=tmp_path, discovery_seconds=1, node_id=None, write_led=True, deny_cloud=False)
-    assert await diagnostics.run(args) == 0
-
-
 async def test_write_failure_never_tries_another_address(diagnostic_peer: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     peer, record, services = diagnostic_peer
     record["addresses"].append("::1")
@@ -571,7 +559,7 @@ async def test_write_failure_never_tries_another_address(diagnostic_peer: Any, m
     monkeypatch.setattr(services, "local_endpoint", track)
     peer.readonly = True
     report = await diagnose(peer, record, services, write=True)
-    assert report["stages"]["restore"]["status"] == "verified_unchanged"
+    assert report["stages"]["restore"]["status"] == "RESTORE_FAILED"
     assert attempted == ["127.0.0.1"]
 
 
@@ -775,7 +763,7 @@ async def test_refused_hub_report_preserves_stages_and_exit_severity(
 
 
 @pytest.mark.parametrize("failure", ["rejected", "timeout", "cancel", "readback"])
-async def test_only_definite_rejection_can_skip_restore_write(failure: str) -> None:
+async def test_write_errors_always_restore_and_verify(failure: str) -> None:
     peer = DiagnosticPeer()
     original = deepcopy(peer.params["LIV Hub"])
     pending: list[dict[str, Any]] = []
@@ -783,6 +771,8 @@ async def test_only_definite_rejection_can_skip_restore_write(failure: str) -> N
 
     async def write(values: dict[str, Any]) -> None:
         if values["LIV Hub"]["LED Brightness"] == 75:
+            if pending:
+                peer.params["LIV Hub"].update(pending.pop())
             peer.params["LIV Hub"].update(values["LIV Hub"])
             return
         if failure == "rejected":
@@ -810,5 +800,60 @@ async def test_only_definite_rejection_can_skip_restore_write(failure: str) -> N
     else:
         await diagnostics.exercise_led(transport, report)
     assert peer.params["LIV Hub"] == original
-    assert transport.write.await_count == (1 if failure == "rejected" else 2)
-    assert report["stages"]["restore"]["status"] == ("verified_unchanged" if failure == "rejected" else "passed")
+    assert transport.write.await_count == 2
+    assert report["stages"]["restore"]["status"] == "passed"
+
+
+@pytest.mark.parametrize("failure", ["http", "protocol"])
+@pytest.mark.parametrize("restore_fails", [False, True])
+async def test_post_dispatch_error_restores_after_stale_read(
+    aiohttp_client: Any, capsys: pytest.CaptureFixture[str], failure: str, *, restore_fails: bool
+) -> None:
+    class FailedWritePeer(DiagnosticPeer):
+        def __init__(self) -> None:
+            super().__init__()
+            self.pending: dict[str, Any] | None = None
+            self.stale_read_seen = False
+
+        async def control(self, request: web.Request) -> web.Response:
+            packet = LocalCtrlMessage.FromString(await request.read())
+            if packet.msg == 6:
+                payload = json.loads(packet.cmd_set_prop_vals.props[0].value)
+                if payload["LIV Hub"]["LED Brightness"] == 74:
+                    self.writes.append(payload)
+                    self.pending = payload["LIV Hub"]
+                    if failure == "http":
+                        return web.Response(status=500)
+                    return web.Response(body=LocalCtrlMessage(msg=1).SerializeToString())
+                if restore_fails:
+                    self.writes.append(payload)
+                    return web.Response(status=500)
+            response = await super().control(request)
+            if packet.msg == 4 and self.pending is not None:
+                # Apply the queued write only after serializing the old snapshot.
+                self.params["LIV Hub"].update(self.pending)
+                self.pending = None
+                self.stale_read_seen = True
+            return response
+
+    peer = FailedWritePeer()
+    before = deepcopy(peer.params["LIV Hub"])
+    app = web.Application()
+    app.router.add_post("/esp_local_ctrl/session", peer.session)
+    app.router.add_post("/esp_local_ctrl/control", peer.control)
+    http = await aiohttp_client(app)
+    url = http.make_url("/")
+    record = {"node_id": "hub", "host": "test.local.", "port": url.port, "addresses": [url.host]}
+    state = parse_device_state("hub", peer.params, {}, peer.config)
+    report = await diagnose(peer, record, HubServices(MagicMock(), lambda: state), write=True)
+    assert peer.stale_read_seen
+    assert report["stages"]["led_write"] == {"status": "failed_or_uncertain", "error_type": "DeviceError"}
+    if restore_fails:
+        assert report["stages"]["restore"]["status"] == "RESTORE_FAILED"
+        assert report["stages"]["restore"]["original_values"] == before
+        assert "RESTORE_FAILED" in capsys.readouterr().err
+    else:
+        assert peer.params["LIV Hub"] == before
+        assert report["stages"]["restore"] == {"status": "passed", "values": before}
+        assert "RESTORE_FAILED" not in capsys.readouterr().err
+    assert peer.writes == [{"LIV Hub": {"LED Brightness": 74}}, {"LIV Hub": {"LED Brightness": 75}}]

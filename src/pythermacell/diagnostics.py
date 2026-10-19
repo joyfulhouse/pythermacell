@@ -25,7 +25,7 @@ from aiohttp import ClientConnectionError, ClientSession, ClientTimeout, DummyCo
 from pythermacell.auth import AuthenticationHandler
 from pythermacell.client import ThermacellClient
 from pythermacell.const import DEFAULT_BASE_URL, DEVICE_TYPE_LIV_HUB, LED_BRIGHTNESS_MAX
-from pythermacell.exceptions import AuthenticationError, DeviceError, ThermacellConnectionError, ThermacellTimeoutError
+from pythermacell.exceptions import AuthenticationError, ThermacellConnectionError, ThermacellTimeoutError
 from pythermacell.local import SERVICE_TYPE, LocalTransport
 from pythermacell.parsers import parse_device_state
 from pythermacell.services import HubServices
@@ -213,20 +213,14 @@ def led_settings(config: dict[str, Any], params: dict[str, Any]) -> dict[str, An
     return values
 
 
-async def restore_led(
-    transport: LocalTransport, original: dict[str, Any], report: dict[str, Any], *, rejected: bool = False
-) -> None:
+async def restore_led(transport: LocalTransport, original: dict[str, Any], report: dict[str, Any]) -> None:
     """Restore only the changed brightness and verify the entire LED snapshot."""
     try:
         async with asyncio.timeout(45):
+            await transport.write({DEVICE_TYPE_LIV_HUB: {"LED Brightness": original["LED Brightness"]}})
             config, params = await transport.read()
             restored = led_settings(config, params)
-            status = "verified_unchanged"
-            if not rejected or restored != original:
-                await transport.write({DEVICE_TYPE_LIV_HUB: {"LED Brightness": original["LED Brightness"]}})
-                config, params = await transport.read()
-                restored = led_settings(config, params)
-                status = "passed" if restored == original else "RESTORE_FAILED"
+            status = "passed" if restored == original else "RESTORE_FAILED"
             stage(report, "restore", status, values=restored)
     except (Exception, asyncio.CancelledError) as exc:
         stage(report, "restore", "RESTORE_FAILED", error_type=type(exc).__name__)
@@ -253,7 +247,6 @@ async def exercise_led(transport: LocalTransport, report: dict[str, Any]) -> Non
         return
     changed = brightness - 1 if brightness else 1
     report["led_before"] = original
-    rejected = False
     try:
         async with asyncio.timeout(30):
             await transport.write({DEVICE_TYPE_LIV_HUB: {"LED Brightness": changed}})
@@ -263,11 +256,10 @@ async def exercise_led(transport: LocalTransport, report: dict[str, Any]) -> Non
             expected = {**original, "LED Brightness": changed}
             stage(report, "led_readback", "passed" if actual == expected else "failed", values=actual)
     except Exception as exc:
-        rejected = isinstance(exc, DeviceError) and report["stages"]["led_write"]["status"] != "passed"
         stage(report, "led_write", "failed_or_uncertain", error_type=type(exc).__name__)
     finally:
         # A cancelled/uncertain command may already have reached the hub.
-        cleanup = asyncio.create_task(restore_led(transport, original, report, rejected=rejected))
+        cleanup = asyncio.create_task(restore_led(transport, original, report))
         cancelled = False
         while not cleanup.done():
             try:
@@ -550,17 +542,7 @@ async def run(args: argparse.Namespace) -> int:
     required: tuple[str, ...] = ("handshake", "identity", "properties")
     if args.write_led:
         required += ("led_write", "led_readback", "restore")
-    return (
-        0
-        if reports
-        and all(
-            r["stages"][s]["status"] == "passed"
-            or (s == "restore" and r["stages"][s]["status"] == "verified_unchanged")
-            for r in reports
-            for s in required
-        )
-        else 2
-    )
+    return 0 if reports and all(r["stages"][s]["status"] == "passed" for r in reports for s in required) else 2
 
 
 def main() -> int:

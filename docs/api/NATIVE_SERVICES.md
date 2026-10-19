@@ -140,10 +140,11 @@ firmware/values are labeled separately; snapshots can differ with timing.
 or missing LED parameters. It changes only `LED Brightness` by one unit, checks
 local readback, and restores the original brightness in `finally`, including
 after an uncertain write or cancellation. It then verifies **all** original LED
-values. After a definite device rejection of the change write,
-`verified_unchanged` means a local read matches the snapshot and no restore write
-was needed. After an uncertain write, cleanup writes the original brightness
-even if its initial read appears unchanged, then verifies by readback. Repeated
+values. Every attempted change is followed by a restore write and readback,
+including after `DeviceError`: HTTP/protocol errors can occur after dispatch
+and do not prove rejection. A rejected change can still finish with restoration
+verified and continue to later hubs. If the restore write or verification itself
+fails, including refusal by a read-only property, it reports `RESTORE_FAILED`. Repeated
 asyncio task cancellation is shielded, but a second real Ctrl-C during an active
 restore can abandon cleanup: that failure prints `RESTORE_FAILED` with the
 original values and exits 3. Allow cleanup to finish after the first Ctrl-C.
