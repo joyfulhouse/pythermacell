@@ -228,6 +228,26 @@ established by these traces, so the existing wire implementation is unchanged.
 Artifacts are retained outside git at
 `/data/projects/joyfulhouse/_artifacts/thermacell-lan-spike-20261018/`.
 
+### Read-Only Rerun, 2026-10-19
+
+After the tribunal fixes, both normal and cloud-denied reads executed commit
+`d9eef09ebf812ae144fbaac8387fe7a45fbe06e2` on physical `server0`. Diagnostic
+source SHA256: `e760bc0a793ca8992cb4a0b9e411fa074b343d15546cc6a17e0672c2de2c56e8`.
+All 23 tracked runtime/dependency files were checked against the checkout before
+execution. ADU and Pool still report firmware 5.4.7, no local-control metadata,
+and no matching mDNS endpoint. Handshake, local identity, local properties, and
+all LED stages remain `not_performed`. Both commands exit 2 for these missing
+prerequisites. Cloud denial is verified with six blocked TCP connects; no live
+device writes were requested or sent. The cloud LED baselines remain 75/240/100
+(brightness/hue/saturation), with no changed/restored values.
+
+The final documentation commit uses this same diagnostic source. Its exact
+checkout SHA and source digest are recorded separately in
+`fix-r1/final-head-readonly.log` and `fix-r1/final-head-denial.log` under the
+artifact directory, alongside per-hub JSON/text reports. These final-head runs
+are also read-only. `LIVE-EVIDENCE.md` records the final checkout provenance and
+distinguishes it from the historical runs.
+
 ### Offline Startup Assessment
 
 - **Startup today:** normal client initialization authenticates to the cloud and
