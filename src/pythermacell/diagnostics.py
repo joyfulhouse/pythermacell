@@ -5,23 +5,26 @@ from __future__ import annotations
 import argparse
 import asyncio
 import importlib
+import ipaddress
 import json
 import logging
 import os
 import socket
 import sys
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager, nullcontext, suppress
 from datetime import UTC, datetime
 from functools import partial
 from http import HTTPStatus
 from pathlib import Path
+from tempfile import TemporaryFile
 from typing import TYPE_CHECKING, Any
-from unittest.mock import patch
 
-from aiohttp import ClientSession, ClientTimeout, DummyCookieJar
+from aiohttp import ClientConnectionError, ClientSession, ClientTimeout, DummyCookieJar
 
+from pythermacell.auth import AuthenticationHandler
 from pythermacell.client import ThermacellClient
 from pythermacell.const import DEFAULT_BASE_URL, DEVICE_TYPE_LIV_HUB, LED_BRIGHTNESS_MAX
+from pythermacell.exceptions import AuthenticationError, ThermacellConnectionError, ThermacellTimeoutError
 from pythermacell.local import SERVICE_TYPE, LocalTransport
 from pythermacell.parsers import parse_device_state
 from pythermacell.services import HubServices
@@ -39,6 +42,63 @@ MAX_BRIGHTNESS = LED_BRIGHTNESS_MAX
 MAX_DISCOVERY_SECONDS = 60
 CLOUD_URL = f"{DEFAULT_BASE_URL}/"
 STAGES = ("discovery", "metadata", "handshake", "identity", "properties", "led_write", "led_readback", "restore")
+MAX_METADATA_LENGTH = 256
+IPV6_SOCKADDR_LENGTH = 4
+_CREDENTIALS: set[str] = set()
+PREREQUISITE_REASONS = (
+    "Set THERMACELL_USERNAME and THERMACELL_PASSWORD",
+    "Cloud account discovery failed",
+    "Cloud metadata fetch failed",
+    "node_id not in account",
+    "Credential detected in report; output refused",
+)
+
+
+def remember_credentials(*values: Any) -> None:
+    """Retain loaded secrets in memory for the output self-check."""
+    _CREDENTIALS.update(value for value in values if isinstance(value, str) and value)
+
+
+def credentials() -> set[str]:
+    """Include environment credentials even before cloud authentication succeeds."""
+    remember_credentials(os.environ.get("THERMACELL_USERNAME"), os.environ.get("THERMACELL_PASSWORD"))
+    return _CREDENTIALS
+
+
+def metadata_value(value: Any) -> str:
+    """Bound scalar metadata and redact known credentials without stringifying containers."""
+    if type(value) not in (str, int) or len(str(value)) > MAX_METADATA_LENGTH:
+        return "<invalid type>"
+    result = str(value)
+    for secret in sorted(credentials(), key=len, reverse=True):
+        result = result.replace(secret, "<redacted>")
+    return result
+
+
+def prerequisite_reason(exc: Exception) -> str:
+    """Explain known failures without exposing third-party exception messages."""
+    for reason in PREREQUISITE_REASONS:
+        if exc.args == (reason,):
+            return reason
+    if isinstance(exc, ModuleNotFoundError) and exc.name in ("zeroconf", "zeroconf.asyncio"):
+        return "Install optional zeroconf dependency"
+    for types, reason in (
+        ((AuthenticationError,), "Cloud authentication failed"),
+        ((TimeoutError, ThermacellTimeoutError), "Prerequisite request timed out"),
+        ((ClientConnectionError, ThermacellConnectionError), "Cloud network connection failed"),
+        ((OSError,), "Prerequisite I/O failed; check output access and network"),
+    ):
+        if isinstance(exc, types):
+            return reason
+    return "Prerequisite failed; exception details withheld"
+
+
+class DiagnosticAuthentication(AuthenticationHandler):
+    """Track transient ID tokens as well as access tokens for output checks."""
+
+    def _decode_jwt_payload(self, jwt_token: str) -> dict[str, Any]:
+        remember_credentials(jwt_token, self.access_token)
+        return super()._decode_jwt_payload(jwt_token)
 
 
 def stage(report: dict[str, Any], name: str, status: str, **details: Any) -> None:
@@ -156,13 +216,19 @@ async def restore_led(transport: LocalTransport, original: dict[str, Any], repor
     """Restore only the changed brightness and verify the entire LED snapshot."""
     try:
         async with asyncio.timeout(45):
-            await transport.write({DEVICE_TYPE_LIV_HUB: {"LED Brightness": original["LED Brightness"]}})
             config, params = await transport.read()
             restored = led_settings(config, params)
-            stage(report, "restore", "passed" if restored == original else "RESTORE_FAILED", values=restored)
-    except Exception as exc:
+            status = "verified_unchanged"
+            if restored != original:
+                await transport.write({DEVICE_TYPE_LIV_HUB: {"LED Brightness": original["LED Brightness"]}})
+                config, params = await transport.read()
+                restored = led_settings(config, params)
+                status = "passed" if restored == original else "RESTORE_FAILED"
+            stage(report, "restore", status, values=restored)
+    except (Exception, asyncio.CancelledError) as exc:
         stage(report, "restore", "RESTORE_FAILED", error_type=type(exc).__name__)
     if report["stages"]["restore"]["status"] == "RESTORE_FAILED":
+        report["stages"]["restore"]["original_values"] = original
         sys.stderr.write(
             "RESTORE_FAILED: STOP all further writes; original LED settings: " + json.dumps(original) + "\n"
         )
@@ -197,11 +263,32 @@ async def exercise_led(transport: LocalTransport, report: dict[str, Any]) -> Non
     finally:
         # A cancelled/uncertain command may already have reached the hub.
         cleanup = asyncio.create_task(restore_led(transport, original, report))
-        try:
-            await asyncio.shield(cleanup)
-        except asyncio.CancelledError:
-            await cleanup
-            raise
+        cancelled = False
+        while not cleanup.done():
+            try:
+                await asyncio.shield(cleanup)
+            except asyncio.CancelledError:
+                cancelled = True
+        if cancelled:
+            raise asyncio.CancelledError
+
+
+def socket_endpoint(address: tuple[Any, ...]) -> tuple[str, int, int]:
+    """Canonicalize IPv4/IPv6 literals, preserving the interface scope identity."""
+    ip = ipaddress.ip_address(address[0])
+    scope = ip.scope_id if isinstance(ip, ipaddress.IPv6Address) else None
+    scope_id = int(scope) if scope and scope.isdecimal() else socket.if_nametoindex(scope) if scope else 0
+    tuple_scope = address[3] if len(address) == IPV6_SOCKADDR_LENGTH else 0
+    if scope_id and tuple_scope and scope_id != tuple_scope:
+        msg = "Conflicting IPv6 scopes"
+        raise ValueError(msg)
+    return str(ip).split("%", 1)[0], address[1], scope_id or tuple_scope
+
+
+def address_preference(address: str) -> int:
+    """Prefer IPv4, then non-link-local IPv6, then scoped link-local IPv6."""
+    ip = ipaddress.ip_address(address)
+    return 0 if isinstance(ip, ipaddress.IPv4Address) else 2 if ip.is_link_local else 1
 
 
 @contextmanager
@@ -209,13 +296,20 @@ def deny_cloud(addresses: set[tuple[str, int]]) -> Iterator[dict[str, Any]]:
     """Restrict TCP connects in this process to discovered LAN endpoints only."""
     connect = socket.socket.connect
     connect_ex = socket.socket.connect_ex
+    allowed = {socket_endpoint(address) for address in addresses}
     evidence: dict[str, Any] = {"status": "active", "blocked_connects": 0, "scope": "process TCP sockets"}
 
     def check(address: Any) -> None:
-        if isinstance(address, tuple) and (address[0], address[1]) not in addresses:
-            evidence["blocked_connects"] += 1
-            msg = "Diagnostic process denies non-LAN connections"
-            raise PermissionError(msg)
+        if not isinstance(address, tuple):
+            return
+        try:
+            if socket_endpoint(address) in allowed:
+                return
+        except (ValueError, OSError):
+            pass
+        evidence["blocked_connects"] += 1
+        msg = "Diagnostic process denies non-LAN connections"
+        raise PermissionError(msg)
 
     def guarded(sock: socket.socket, address: Any) -> None:
         check(address)
@@ -225,8 +319,13 @@ def deny_cloud(addresses: set[tuple[str, int]]) -> Iterator[dict[str, Any]]:
         check(address)
         return connect_ex(sock, address)
 
-    with patch.object(socket.socket, "connect", guarded), patch.object(socket.socket, "connect_ex", guarded_ex):
+    try:
+        for name, method in (("connect", guarded), ("connect_ex", guarded_ex)):
+            setattr(socket.socket, name, method)
         yield evidence
+    finally:
+        for name, original in (("connect", connect), ("connect_ex", connect_ex)):
+            setattr(socket.socket, name, original)
 
 
 async def probe_denial(evidence: dict[str, Any]) -> None:
@@ -248,7 +347,13 @@ async def account_nodes() -> list[tuple[str, dict[str, Any], dict[str, Any], Hub
     if not username or not password:
         msg = "Set THERMACELL_USERNAME and THERMACELL_PASSWORD"
         raise ValueError(msg)
-    async with asyncio.timeout(60), ThermacellClient(username, password) as client:
+    remember_credentials(username, password)
+
+    def session_updated(handler: AuthenticationHandler) -> None:
+        remember_credentials(handler.access_token)
+
+    auth = DiagnosticAuthentication(username, password, on_session_updated=session_updated)
+    async with asyncio.timeout(60), ThermacellClient(username, password, auth_handler=auth) as client:
         status, data = await client.api.get_nodes()
         if status != HTTPStatus.OK or data is None:
             msg = "Cloud account discovery failed"
@@ -261,6 +366,7 @@ async def account_nodes() -> list[tuple[str, dict[str, Any], dict[str, Any], Hub
                 msg = "Cloud metadata fetch failed"
                 raise RuntimeError(msg)
             services = HubServices(client.api, partial(parse_device_state, node, params, {}, config))
+            metadata_report(services)
             result.append((node, config, params, services))
         return result
 
@@ -269,6 +375,9 @@ def metadata_report(services: HubServices) -> dict[str, Any]:
     """Resolve the existing capability parser; expose presence only for credentials."""
     kind = "esp.service.local_control"
     security = services.value(kind, "esp.param.local_control_type")
+    remember_credentials(
+        services.value(kind, "esp.param.local_control_pop"), services.value(kind, "esp.param.local_control_username")
+    )
     return {
         "status": "advertised" if services.parameter(kind, "esp.param.local_control_type") else "not_advertised",
         "security_type": security if type(security) is int else None,
@@ -291,32 +400,42 @@ async def diagnose_node(
     """Run staged direct transport checks for exactly one account node."""
     if report is None:
         report = new_report(node)
-    report["name"] = str(params.get(DEVICE_TYPE_LIV_HUB, {}).get("Name", node))
-    report["cloud_firmware"] = str(config.get("info", {}).get("fw_version", "unknown"))
-    report["cloud_baseline"] = selected_values(params)
     report["stages"]["metadata"] = metadata_report(services)
+    report["name"] = metadata_value(params.get(DEVICE_TYPE_LIV_HUB, {}).get("Name", node))
+    report["cloud_firmware"] = metadata_value(config.get("info", {}).get("fw_version", "unknown"))
+    report["cloud_baseline"] = selected_values(params)
     matches = [entry for entry in discovered if entry["node_id"] == node]
     stage(report, "discovery", "passed" if matches else "not_found", records=matches)
     if not matches:
         return report
-    record = matches[0]
-    if not record["addresses"]:
+    candidates = sorted(
+        {(address, record["port"]) for record in matches for address in record["addresses"]},
+        key=lambda candidate: (address_preference(candidate[0]), candidate),
+    )
+    if not candidates:
         stage(report, "discovery", "failed", reason="No resolved addresses", records=matches)
         return report
-    endpoint = services.local_endpoint(record["addresses"][0], record["port"])
-    if endpoint is None:
-        report["stages"]["metadata"]["reason"] = "No usable advertised local-control credentials/security"
-        return report
     async with ClientSession(cookie_jar=DummyCookieJar(), trust_env=False) as session:
-        transport = DiagnosticTransport(session, endpoint, report)
-        try:
-            async with asyncio.timeout(30):
-                local_config, local_params = await transport.read()
-        except Exception as exc:
-            if report["stages"]["handshake"]["status"] == "passed":
-                stage(report, "properties", "failed", error_type=type(exc).__name__)
+        for address, port in candidates:
+            endpoint = services.local_endpoint(address, port)
+            if endpoint is None:
+                report["stages"]["metadata"]["reason"] = "No usable advertised local-control credentials/security"
+                return report
+            for name in ("handshake", "identity", "properties"):
+                stage(report, name, "not_performed")
+            report["selected_endpoint"] = {"address": address, "port": port}
+            transport = DiagnosticTransport(session, endpoint, report)
+            try:
+                async with asyncio.timeout(30):
+                    local_config, local_params = await transport.read()
+            except Exception as exc:
+                if report["stages"]["handshake"]["status"] == "passed":
+                    stage(report, "properties", "failed", error_type=type(exc).__name__)
+            else:
+                break
+        else:
             return report
-        report["local_firmware"] = str(local_config.get("info", {}).get("fw_version", "unknown"))
+        report["local_firmware"] = metadata_value(local_config.get("info", {}).get("fw_version", "unknown"))
         stage(report, "properties", "passed", values=selected_values(local_params))
         transport.observing = False
         if write_led:
@@ -327,25 +446,45 @@ async def diagnose_node(
     return report
 
 
-def save_report(directory: Path, report: dict[str, Any]) -> None:
-    """Write timestamped JSON/text with restrictive permissions, never raw responses."""
+def prepare_output(directory: Path) -> None:
+    """Check artifact access before any hub operation, including optional writes."""
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     directory.chmod(0o700)
+    with TemporaryFile(dir=directory):
+        pass
+
+
+def save_report(directory: Path, report: dict[str, Any]) -> None:
+    """Write timestamped JSON/text with restrictive permissions, never raw responses."""
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
     # Node identifiers are data, never path components.
     stem = f"{stamp}-hub"
     content = json.dumps(report, indent=2, allow_nan=False) + "\n"
-    for suffix in ("json", "txt"):
+    summary = (
+        f"Hub {report.get('name', report['node_id'])} ({report['node_id']}) at {report['timestamp']}\n"
+        + "\n".join(f"{name}: {result['status']}" for name, result in report["stages"].items())
+        + f"\ncloud_denial: {report['cloud_denial']['status']}\n"
+        + (f"prerequisite: {report['reason']}\n" if "reason" in report else "")
+    )
+    if any(secret in content + summary or json.dumps(secret)[1:-1] in content for secret in credentials()):
+        msg = "Credential detected in report; output refused"
+        raise ValueError(msg)
+    prepare_output(directory)
+    for suffix, text in (("json", content), ("txt", summary)):
         path = directory / f"{stem}.{suffix}"
         with path.open("x", encoding="utf-8") as stream:
             path.chmod(0o600)
-            stream.write(content)
+            stream.write(text)
     sys.stdout.write(content)
 
 
 async def run(args: argparse.Namespace) -> int:
     """Fetch cloud prerequisites first, close cloud sessions, then run LAN only."""
+    await asyncio.to_thread(prepare_output, args.output)
     nodes = await account_nodes()
+    if args.node_id and not any(node == args.node_id for node, *_ in nodes):
+        msg = "node_id not in account"
+        raise ValueError(msg)
     discovered = await discover(args.discovery_seconds)
     allowed = {(ip, entry["port"]) for entry in discovered for ip in entry["addresses"]}
     reports = []
@@ -377,7 +516,17 @@ async def run(args: argparse.Namespace) -> int:
     required: tuple[str, ...] = ("handshake", "identity", "properties")
     if args.write_led:
         required += ("led_write", "led_readback", "restore")
-    return 0 if reports and all(r["stages"][s]["status"] == "passed" for r in reports for s in required) else 2
+    return (
+        0
+        if reports
+        and all(
+            r["stages"][s]["status"] == "passed"
+            or (s == "restore" and r["stages"][s]["status"] == "verified_unchanged")
+            for r in reports
+            for s in required
+        )
+        else 2
+    )
 
 
 def main() -> int:
@@ -400,7 +549,12 @@ def main() -> int:
     except Exception as exc:
         report = new_report("unavailable")
         report["prerequisite_failure"] = type(exc).__name__
-        save_report(args.output, report)
+        report["reason"] = prerequisite_reason(exc)
+        try:
+            save_report(args.output, report)
+        except Exception:
+            with suppress(Exception):
+                sys.stderr.write("Diagnostic failed; unable to write a safe report. Check output access.\n")
         return 2
     finally:
         logging.disable(previous_logging)

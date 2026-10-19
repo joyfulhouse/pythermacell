@@ -14,6 +14,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Document live firmware 5.4.7 results for ADU/Pool: no advertised local-control
   metadata or matching mDNS endpoint; no live local reads or writes claimed.
 
+### Fixed
+- Keep LED restoration shielded through repeated cancellation and verify unchanged
+  state without writing after a rejected command.
+- Fail closed on diagnostic output errors and known credential leaks; validate
+  metadata, explain missing prerequisites safely, and summarize text artifacts.
+- Preserve IPv6 interface scopes under process cloud denial and try alternative
+  discovered addresses for reads without retrying writes on another endpoint.
+
 ## [0.3.0b3] - 2026-10-18
 
 ### Fixed

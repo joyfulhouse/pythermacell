@@ -140,7 +140,10 @@ firmware/values are labeled separately; snapshots can differ with timing.
 or missing LED parameters. It changes only `LED Brightness` by one unit, checks
 local readback, and restores the original brightness in `finally`, including
 after an uncertain write or cancellation. It then verifies **all** original LED
-values. Saturation is captured and checked but never sent, per
+values. Cleanup first reads the current settings: `verified_unchanged` means
+they already match the snapshot and no restore write was needed. Repeated task
+cancellation cannot interrupt the bounded cleanup attempt. Saturation is
+captured and checked but never sent, per
 [LED control](LED_CONTROL.md). No power, refill, schedule, timer, reboot or OTA
 commands are issued. Allow cleanup to finish after Ctrl-C; SIGKILL, machine loss,
 or loss of hub connectivity cannot guarantee restoration. `RESTORE_FAILED` is
@@ -150,6 +153,15 @@ write mode until restoration has been resolved.
 JSON and human-readable text artifacts are timestamped per node in a mode-0700
 directory, with mode-0600 files. Reports project only selected fields; raw cloud
 responses, authentication data, cookies, and exception messages are excluded.
+Names and firmware accept only bounded strings or integers; structured metadata
+is marked `<invalid type>`. Known credentials are redacted from those strings.
+Before writing either artifact or stdout, a narrow self-check refuses output
+containing a loaded account username/password, access/ID token, PoP, or local
+username. This also checks JSON-escaped values. It does not detect unknown or
+transformed secrets, inspect other logs, or revoke credentials. Output access is
+checked before hub operations. A safe prerequisite reason distinguishes missing
+credentials, optional zeroconf, unknown account nodes, and authentication/network
+failures; external exception messages remain withheld.
 Normal and third-party logs are disabled by the standalone command. Exit status
 is 0 for all requested stages passing, 2 for missing prerequisites/unsupported
 or failed stages, 3 for restoration failure, and 130 for interruption after
@@ -162,8 +174,32 @@ It never changes DNS, router, or firewall settings. DNS resolution itself is
 allowed. An unverified guard disables LED writes. Reports distinguish a verified
 blocked connection from merely selecting `LocalTransport`. A missing LAN
 endpoint still prevents proving local reads/writes during a cloud outage.
+IPv6 scope names and numeric socket scope IDs refer to the same interface; other
+scopes remain denied. Reads try discovered addresses in order of IPv4, global
+(or unique-local) IPv6, then link-local IPv6. Each candidate has a 30-second read
+bound. LED writes and their restoration stay on the successfully read endpoint;
+an uncertain write is never retried at another address.
+
+### If a Secret Leaks
+
+Stop sharing the affected artifacts and restrict or remove exposed copies,
+including CI logs and downloads. Change the cloud account password and invalidate
+affected sessions/tokens using supported account or vendor controls. Existing
+tokens may remain valid for their remaining lifetime even after a password change;
+do not assume password rotation revokes them. Local PoP/username rotation may
+require reprovisioning through vendor-supported procedures and is vendor-dependent.
+Verify that old credentials no longer authenticate before resuming sharing.
+
+There is no comprehensive automated leak detection or revocation here. The output
+self-check only compares against credentials loaded by this process. Consider
+separate secret scanning for the artifact directory before publication. Detection
+and revocation response times are operator-dependent and unmeasured.
 
 ### Live Result, 2026-10-18
+
+These historical runs executed commit
+`5167a8af3841cfc4f76e6fd6bc10b2386c71786a`. The historical final-denial log does
+not contain a source digest; it must not be used as source-hash evidence.
 
 Read-only runs used existing account credentials from the homelab secret source,
 first on pod `server0` (`10.42.1.31`) and then through existing SSH access to
