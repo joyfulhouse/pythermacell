@@ -387,7 +387,7 @@ class ThermacellDevice:
                     if power_on:
                         confirmed = not states or any(state in (2, 3) for state in states)
                     else:
-                        confirmed = all(state == 1 for state in states)
+                        confirmed = bool(states) and all(type(state) is int and state == 1 for state in states)
                     if confirmed:
                         return True
         except TimeoutError:
