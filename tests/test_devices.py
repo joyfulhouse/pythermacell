@@ -543,6 +543,23 @@ async def test_unconfirmed_off_fails(device: ThermacellDevice, mock_api: Thermac
     assert device.is_powered_on
 
 
+@pytest.mark.parametrize(
+    "states",
+    [{}, {"System Status": None}, {"System Status": True}, {"System State": 1, "System Status": 2}],
+)
+async def test_off_requires_explicit_operational_evidence(
+    device: ThermacellDevice, mock_api: ThermacellAPI, states: dict[str, object]
+) -> None:
+    """Missing, malformed, or contradictory reports must not clear a shutdown safeguard."""
+    from unittest.mock import patch
+
+    mock_api.get_node_params.return_value = (200, {"LIV Hub": {"Enable Repellers": False, **states}})
+    with patch("pythermacell.devices.asyncio.sleep", new_callable=AsyncMock):
+        assert not await device.set_power(False, verify=True)
+    assert mock_api.get_node_params.await_count == 6
+    mock_api.update_node_params.assert_awaited_once_with(device.node_id, {"LIV Hub": {"Enable Repellers": False}})
+
+
 async def test_warming_up_after_acknowledged_off_preserves_failure_evidence(
     device: ThermacellDevice, mock_api: ThermacellAPI, caplog: pytest.LogCaptureFixture
 ) -> None:

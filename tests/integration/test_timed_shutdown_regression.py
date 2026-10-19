@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 from typing import TYPE_CHECKING
@@ -24,6 +23,22 @@ pytestmark = [
 ]
 
 
+def shutdown_report(params: dict) -> dict:
+    """Allowlist shutdown evidence; never log configuration or repeller identifiers."""
+    hub = params.get("LIV Hub", {})
+    return {key: hub.get(key) for key in ("Enable Repellers", "System State", "System Status", "Error")}
+
+
+def confirmed_off(params: dict) -> bool:
+    report = shutdown_report(params)
+    return (
+        report["Enable Repellers"] is False
+        and type(report["System State"]) is int
+        and type(report["System Status"]) is int
+        and report["System State"] == report["System Status"] == 1
+    )
+
+
 async def test_native_timer_then_run_for_shutdown(
     shared_integration_client: ThermacellClient, test_node_id: str | None
 ) -> None:
@@ -40,33 +55,41 @@ async def test_native_timer_then_run_for_shutdown(
     hub = baseline["LIV Hub"]
     assert hub.get("Enable Repellers") is False
     assert hub.get("System State") == hub.get("System Status") == 1
-    confirmed_off = False
+    cleanup_confirmed = False
     try:
         await device.services.set_shutdown_timer(20)
         assert await device.set_power(True, verify=True)
         await asyncio.sleep(25)
         status, expired = await shared_integration_client.api.get_node_params(test_node_id)
-        _LOGGER.info("Native 20-second timer result: %s %s", status, json.dumps(expired))
+        _LOGGER.info("Native 20-second timer result: %s %s", status, shutdown_report(expired or {}))
         assert status == 200
         assert isinstance(expired, dict)
-        assert expired["LIV Hub"].get("Enable Repellers") is False
-        assert expired["LIV Hub"].get("System State") == expired["LIV Hub"].get("System Status") == 1
+        expired_on_time = confirmed_off(expired)
+        if not expired_on_time:
+            # Collect settling evidence even when the first native-expiry assertion fails.
+            for poll in range(6):
+                await asyncio.sleep(5)
+                status, reported = await shared_integration_client.api.get_node_params(test_node_id)
+                _LOGGER.warning("Native expiry poll %s: %s %s", poll + 1, status, shutdown_report(reported or {}))
+                if status == 200 and isinstance(reported, dict) and confirmed_off(reported):
+                    break
+        assert expired_on_time, f"Native expiry did not confirm operational Off: {shutdown_report(expired)}"
 
         await device.services.set_shutdown_timer(60)
         assert await device.set_power(True, verify=True)
-        confirmed_off = await device.set_power(False, verify=True)
+        cleanup_confirmed = await device.set_power(False, verify=True)
         # Keep collecting after failure to distinguish slow settling from a stuck report.
-        if not confirmed_off:
+        if not cleanup_confirmed:
             for poll in range(12):
                 await asyncio.sleep(5)
                 status, reported = await shared_integration_client.api.get_node_params(test_node_id)
-                _LOGGER.warning("Off recovery poll %s: %s %s", poll + 1, status, json.dumps(reported))
-        assert confirmed_off, "Off command was accepted but operational shutdown was not confirmed"
+                _LOGGER.warning("Off recovery poll %s: %s %s", poll + 1, status, shutdown_report(reported or {}))
+        assert cleanup_confirmed, "Off command was accepted but operational shutdown was not confirmed"
     finally:
         # Always attempt verified off; retain the native safeguard if confirmation fails.
-        confirmed_off = await device.set_power(False, verify=True)
-        if confirmed_off:
+        cleanup_confirmed = await device.set_power(False, verify=True)
+        if cleanup_confirmed:
             await device.services.cancel_shutdown_timer()
         else:
             _LOGGER.error("Cleanup could not confirm shutdown; native timer retained; inspect the hub")
-        assert confirmed_off, "Cleanup could not confirm shutdown"
+        assert cleanup_confirmed, "Cleanup could not confirm shutdown"
