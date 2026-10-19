@@ -18,7 +18,7 @@ from aiohttp import web
 from pythermacell import diagnostics
 from pythermacell._proto.local_pb2 import LocalCtrlMessage
 from pythermacell.client import ThermacellClient
-from pythermacell.exceptions import AuthenticationError, ThermacellConnectionError
+from pythermacell.exceptions import AuthenticationError, DeviceError, ThermacellConnectionError
 from pythermacell.local import LocalTransport
 from pythermacell.parsers import parse_device_state
 from pythermacell.services import HubServices
@@ -32,6 +32,7 @@ if TYPE_CHECKING:
 @pytest.fixture(autouse=True)
 def isolated_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(diagnostics, "_CREDENTIALS", set(), raising=False)
+    diagnostics._RESTORE_FAILED.clear()
     monkeypatch.delenv("THERMACELL_USERNAME", raising=False)
     monkeypatch.delenv("THERMACELL_PASSWORD", raising=False)
 
@@ -616,27 +617,198 @@ def test_text_artifact_summarizes_stages(tmp_path: Path) -> None:
     assert text != next(tmp_path.glob("*.json")).read_text()
 
 
-async def test_account_bootstrap_tracks_tokens_for_output_check(
+async def test_account_bootstrap_tracks_public_credentials(
     aiohttp_client: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     access_token = "synthetic-access-token"
     id_token = "header.eyJjdXN0b206dXNlcl9pZCI6InVzZXIxMjMifQ.signature"
+    assert "_decode_jwt_payload" not in inspect.getsource(diagnostics)
+    peer = DiagnosticPeer()
     app = web.Application()
     app.router.add_post(
         "/v1/login2", lambda request: web.json_response({"accesstoken": access_token, "idtoken": id_token})
     )
-    app.router.add_get("/v1/user/nodes", lambda request: web.json_response({"nodes": []}))
+    app.router.add_get("/v1/user/nodes", lambda request: web.json_response({"nodes": ["hub"]}))
+    app.router.add_get("/v1/user/nodes/config", lambda request: web.json_response(peer.config))
+    app.router.add_get("/v1/user/nodes/params", lambda request: web.json_response(peer.params))
     cloud = await aiohttp_client(app)
     url = str(cloud.make_url("/")).rstrip("/")
     monkeypatch.setenv("THERMACELL_USERNAME", "account-user")
     monkeypatch.setenv("THERMACELL_PASSWORD", "account-password")
     monkeypatch.setattr(diagnostics, "ThermacellClient", partial(ThermacellClient, base_url=url))
-    monkeypatch.setattr(
-        diagnostics, "DiagnosticAuthentication", partial(diagnostics.DiagnosticAuthentication, base_url=url)
-    )
-    assert await diagnostics.account_nodes() == []
-    for token in (access_token, id_token):
+    monkeypatch.setattr(diagnostics, "AuthenticationHandler", partial(diagnostics.AuthenticationHandler, base_url=url))
+    metadata = MagicMock(side_effect=AssertionError("Bootstrap must explicitly collect local credentials"))
+    monkeypatch.setattr(diagnostics, "metadata_report", metadata)
+    nodes = await diagnostics.account_nodes()
+    assert [node for node, *_ in nodes] == ["hub"]
+    metadata.assert_not_called()
+    assert id_token not in diagnostics._CREDENTIALS
+    for token in (access_token, "hidden-pop", "hidden-username"):
         report = diagnostics.new_report("hub")
         report["unexpected"] = token
         with pytest.raises(ValueError, match="Credential detected"):
             await asyncio.to_thread(diagnostics.save_report, tmp_path, report)
+
+
+def test_second_interrupt_preserves_restore_failure_exit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    peer = DiagnosticPeer()
+    original = deepcopy(peer.params["LIV Hub"])
+    restoring = asyncio.Event()
+    transport = AsyncMock(spec=LocalTransport)
+    transport.read.return_value = (peer.config, peer.params)
+
+    async def write(values: dict[str, Any]) -> None:
+        if values["LIV Hub"]["LED Brightness"] == 75:
+            restoring.set()
+            await asyncio.Event().wait()
+        peer.params["LIV Hub"].update(values["LIV Hub"])
+
+    async def diagnose(*args: Any, **kwargs: Any) -> None:
+        await diagnostics.exercise_led(transport, kwargs["report"])
+
+    async def first_interrupt(coro: Any) -> None:
+        task = asyncio.create_task(coro)
+        await asyncio.wait_for(restoring.wait(), 1)
+        task.cancel()
+        await asyncio.sleep(0)
+        assert peer.params["LIV Hub"]["LED Brightness"] == 74
+
+    def second_interrupt(coro: Any) -> None:
+        with asyncio.Runner() as runner:
+            runner.run(first_interrupt(coro))
+            # A second SIGINT raises here; Runner then cancels every remaining task.
+            raise KeyboardInterrupt
+
+    transport.write.side_effect = write
+    monkeypatch.setattr(diagnostics, "account_nodes", AsyncMock(return_value=[("hub", {}, {}, None)]))
+    monkeypatch.setattr(diagnostics, "discover", AsyncMock(return_value=[]))
+    monkeypatch.setattr(diagnostics, "diagnose_node", diagnose)
+    monkeypatch.setattr(diagnostics.asyncio, "run", second_interrupt)
+    monkeypatch.setattr("sys.argv", ["lan", "--output", str(tmp_path), "--write-led"])
+    assert diagnostics.main() == 3
+    report = json.loads(next(tmp_path.glob("*.json")).read_text())
+    assert report["stages"]["restore"]["status"] == "RESTORE_FAILED"
+    assert report["stages"]["restore"]["original_values"] == original
+    error = capsys.readouterr().err
+    assert "RESTORE_FAILED" in error
+    assert json.dumps(original) in error
+
+
+@pytest.mark.parametrize("ending", ["error", "interrupt", "cancel", "success"])
+def test_main_exit_precedence_resets_for_next_invocation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, ending: str
+) -> None:
+    async def failed_restore(args: argparse.Namespace) -> int:
+        diagnostics.stage(diagnostics.new_report("hub"), "restore", "RESTORE_FAILED")
+        if ending == "error":
+            raise ValueError("hidden-secret")
+        if ending == "interrupt":
+            raise KeyboardInterrupt
+        if ending == "cancel":
+            raise asyncio.CancelledError
+        return 0
+
+    monkeypatch.setattr(diagnostics, "run", failed_restore)
+    monkeypatch.setattr("sys.argv", ["lan", "--output", str(tmp_path)])
+    assert diagnostics.main() == 3
+    monkeypatch.setattr(diagnostics, "run", AsyncMock(return_value=0))
+    assert diagnostics.main() == 0
+
+
+@pytest.mark.parametrize("restore_failed", [False, True])
+@pytest.mark.parametrize("secret", ["first-node", "2026", "not_performed"])
+async def test_refused_hub_report_preserves_stages_and_exit_severity(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    secret: str,
+    *,
+    restore_failed: bool,
+) -> None:
+    monkeypatch.setattr(
+        diagnostics,
+        "account_nodes",
+        AsyncMock(return_value=[("first-node", {}, {}, None), ("second-node", {}, {}, None)]),
+    )
+    monkeypatch.setattr(diagnostics, "discover", AsyncMock(return_value=[]))
+    diagnostics.remember_credentials(secret)
+    visited = []
+
+    async def diagnose(node: str, *args: Any, **kwargs: Any) -> None:
+        visited.append(node)
+        report = kwargs["report"]
+        report["timestamp"] = "2026-10-19T00:00:00Z"
+        for name in ("handshake", "identity", "properties"):
+            diagnostics.stage(report, name, "passed")
+        if restore_failed:
+            diagnostics.stage(report, "restore", "RESTORE_FAILED")
+
+    monkeypatch.setattr(diagnostics, "diagnose_node", diagnose)
+    args = argparse.Namespace(
+        output=tmp_path, discovery_seconds=1, node_id=None, write_led=restore_failed, deny_cloud=False
+    )
+    assert await diagnostics.run(args) == (3 if restore_failed else 2)
+    assert visited == (["first-node"] if restore_failed else ["first-node", "second-node"])
+
+    def artifacts() -> list[dict[str, Any]]:
+        paths = list(tmp_path.glob("*.json"))
+        assert len(paths) == (0 if secret == "not_performed" else len(visited))
+        for path in tmp_path.iterdir():
+            assert secret not in path.read_text()
+        return [json.loads(path.read_text()) for path in paths]
+
+    reports = await asyncio.to_thread(artifacts)
+    stubs = [report for report in reports if "reason" in report]
+    if reports:
+        assert stubs
+    for stub in stubs:
+        assert set(stub) == {"stages", "reason"}
+        assert stub["reason"] == "Credential detected in report; output refused"
+        assert stub["stages"]["properties"] == {"status": "passed"}
+        assert stub["stages"]["restore"]["status"] == ("RESTORE_FAILED" if restore_failed else "not_performed")
+    captured = capsys.readouterr()
+    assert secret not in captured.out + captured.err
+    if secret == "not_performed":
+        assert "Diagnostic report withheld" in captured.err
+
+
+@pytest.mark.parametrize("failure", ["rejected", "timeout", "cancel", "readback"])
+async def test_only_definite_rejection_can_skip_restore_write(failure: str) -> None:
+    peer = DiagnosticPeer()
+    original = deepcopy(peer.params["LIV Hub"])
+    pending: list[dict[str, Any]] = []
+    transport = AsyncMock(spec=LocalTransport)
+
+    async def write(values: dict[str, Any]) -> None:
+        if values["LIV Hub"]["LED Brightness"] == 75:
+            peer.params["LIV Hub"].update(values["LIV Hub"])
+            return
+        if failure == "rejected":
+            raise DeviceError("hidden-rejection")
+        pending.append(values["LIV Hub"])
+        if failure == "cancel":
+            raise asyncio.CancelledError
+        if failure == "timeout":
+            raise TimeoutError("hidden-timeout")
+
+    async def read() -> tuple[dict[str, Any], dict[str, Any]]:
+        if failure == "readback" and transport.read.await_count == 2:
+            raise DeviceError("hidden-readback-failure")
+        snapshot = deepcopy(peer.params)
+        if pending:
+            peer.params["LIV Hub"].update(pending.pop())
+        return peer.config, snapshot
+
+    transport.write.side_effect = write
+    transport.read.side_effect = read
+    report = diagnostics.new_report("hub")
+    if failure == "cancel":
+        with pytest.raises(asyncio.CancelledError):
+            await diagnostics.exercise_led(transport, report)
+    else:
+        await diagnostics.exercise_led(transport, report)
+    assert peer.params["LIV Hub"] == original
+    assert transport.write.await_count == (1 if failure == "rejected" else 2)
+    assert report["stages"]["restore"]["status"] == ("verified_unchanged" if failure == "rejected" else "passed")

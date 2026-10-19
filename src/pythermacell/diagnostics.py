@@ -17,6 +17,7 @@ from functools import partial
 from http import HTTPStatus
 from pathlib import Path
 from tempfile import TemporaryFile
+from threading import Event
 from typing import TYPE_CHECKING, Any
 
 from aiohttp import ClientConnectionError, ClientSession, ClientTimeout, DummyCookieJar
@@ -24,7 +25,7 @@ from aiohttp import ClientConnectionError, ClientSession, ClientTimeout, DummyCo
 from pythermacell.auth import AuthenticationHandler
 from pythermacell.client import ThermacellClient
 from pythermacell.const import DEFAULT_BASE_URL, DEVICE_TYPE_LIV_HUB, LED_BRIGHTNESS_MAX
-from pythermacell.exceptions import AuthenticationError, ThermacellConnectionError, ThermacellTimeoutError
+from pythermacell.exceptions import AuthenticationError, DeviceError, ThermacellConnectionError, ThermacellTimeoutError
 from pythermacell.local import SERVICE_TYPE, LocalTransport
 from pythermacell.parsers import parse_device_state
 from pythermacell.services import HubServices
@@ -45,13 +46,19 @@ STAGES = ("discovery", "metadata", "handshake", "identity", "properties", "led_w
 MAX_METADATA_LENGTH = 256
 IPV6_SOCKADDR_LENGTH = 4
 _CREDENTIALS: set[str] = set()
+_RESTORE_FAILED = Event()
+REPORT_REFUSAL_REASON = "Credential detected in report; output refused"
 PREREQUISITE_REASONS = (
     "Set THERMACELL_USERNAME and THERMACELL_PASSWORD",
     "Cloud account discovery failed",
     "Cloud metadata fetch failed",
     "node_id not in account",
-    "Credential detected in report; output refused",
+    REPORT_REFUSAL_REASON,
 )
+
+
+class ReportRefusedError(ValueError):
+    """A report contains a known credential and must not reach any output."""
 
 
 def remember_credentials(*values: Any) -> None:
@@ -93,17 +100,11 @@ def prerequisite_reason(exc: Exception) -> str:
     return "Prerequisite failed; exception details withheld"
 
 
-class DiagnosticAuthentication(AuthenticationHandler):
-    """Track transient ID tokens as well as access tokens for output checks."""
-
-    def _decode_jwt_payload(self, jwt_token: str) -> dict[str, Any]:
-        remember_credentials(jwt_token, self.access_token)
-        return super()._decode_jwt_payload(jwt_token)
-
-
 def stage(report: dict[str, Any], name: str, status: str, **details: Any) -> None:
     """Record only explicitly selected, non-secret evidence."""
     report["stages"][name] = {"status": status, **details}
+    if name == "restore" and status == "RESTORE_FAILED":
+        _RESTORE_FAILED.set()
 
 
 def selected_values(params: dict[str, Any], names: tuple[str, ...] = READ_NAMES) -> dict[str, Any]:
@@ -212,14 +213,16 @@ def led_settings(config: dict[str, Any], params: dict[str, Any]) -> dict[str, An
     return values
 
 
-async def restore_led(transport: LocalTransport, original: dict[str, Any], report: dict[str, Any]) -> None:
+async def restore_led(
+    transport: LocalTransport, original: dict[str, Any], report: dict[str, Any], *, rejected: bool = False
+) -> None:
     """Restore only the changed brightness and verify the entire LED snapshot."""
     try:
         async with asyncio.timeout(45):
             config, params = await transport.read()
             restored = led_settings(config, params)
             status = "verified_unchanged"
-            if restored != original:
+            if not rejected or restored != original:
                 await transport.write({DEVICE_TYPE_LIV_HUB: {"LED Brightness": original["LED Brightness"]}})
                 config, params = await transport.read()
                 restored = led_settings(config, params)
@@ -250,6 +253,7 @@ async def exercise_led(transport: LocalTransport, report: dict[str, Any]) -> Non
         return
     changed = brightness - 1 if brightness else 1
     report["led_before"] = original
+    rejected = False
     try:
         async with asyncio.timeout(30):
             await transport.write({DEVICE_TYPE_LIV_HUB: {"LED Brightness": changed}})
@@ -259,10 +263,11 @@ async def exercise_led(transport: LocalTransport, report: dict[str, Any]) -> Non
             expected = {**original, "LED Brightness": changed}
             stage(report, "led_readback", "passed" if actual == expected else "failed", values=actual)
     except Exception as exc:
+        rejected = isinstance(exc, DeviceError) and report["stages"]["led_write"]["status"] != "passed"
         stage(report, "led_write", "failed_or_uncertain", error_type=type(exc).__name__)
     finally:
         # A cancelled/uncertain command may already have reached the hub.
-        cleanup = asyncio.create_task(restore_led(transport, original, report))
+        cleanup = asyncio.create_task(restore_led(transport, original, report, rejected=rejected))
         cancelled = False
         while not cleanup.done():
             try:
@@ -352,7 +357,7 @@ async def account_nodes() -> list[tuple[str, dict[str, Any], dict[str, Any], Hub
     def session_updated(handler: AuthenticationHandler) -> None:
         remember_credentials(handler.access_token)
 
-    auth = DiagnosticAuthentication(username, password, on_session_updated=session_updated)
+    auth = AuthenticationHandler(username, password, on_session_updated=session_updated)
     async with asyncio.timeout(60), ThermacellClient(username, password, auth_handler=auth) as client:
         status, data = await client.api.get_nodes()
         if status != HTTPStatus.OK or data is None:
@@ -366,18 +371,23 @@ async def account_nodes() -> list[tuple[str, dict[str, Any], dict[str, Any], Hub
                 msg = "Cloud metadata fetch failed"
                 raise RuntimeError(msg)
             services = HubServices(client.api, partial(parse_device_state, node, params, {}, config))
-            metadata_report(services)
+            remember_local_credentials(services)
             result.append((node, config, params, services))
         return result
+
+
+def remember_local_credentials(services: HubServices) -> None:
+    """Collect advertised local credentials before projecting any node metadata."""
+    kind = "esp.service.local_control"
+    remember_credentials(
+        services.value(kind, "esp.param.local_control_pop"), services.value(kind, "esp.param.local_control_username")
+    )
 
 
 def metadata_report(services: HubServices) -> dict[str, Any]:
     """Resolve the existing capability parser; expose presence only for credentials."""
     kind = "esp.service.local_control"
     security = services.value(kind, "esp.param.local_control_type")
-    remember_credentials(
-        services.value(kind, "esp.param.local_control_pop"), services.value(kind, "esp.param.local_control_username")
-    )
     return {
         "status": "advertised" if services.parameter(kind, "esp.param.local_control_type") else "not_advertised",
         "security_type": security if type(security) is int else None,
@@ -400,6 +410,7 @@ async def diagnose_node(
     """Run staged direct transport checks for exactly one account node."""
     if report is None:
         report = new_report(node)
+    remember_local_credentials(services)
     report["stages"]["metadata"] = metadata_report(services)
     report["name"] = metadata_value(params.get(DEVICE_TYPE_LIV_HUB, {}).get("Name", node))
     report["cloud_firmware"] = metadata_value(config.get("info", {}).get("fw_version", "unknown"))
@@ -460,15 +471,20 @@ def save_report(directory: Path, report: dict[str, Any]) -> None:
     # Node identifiers are data, never path components.
     stem = f"{stamp}-hub"
     content = json.dumps(report, indent=2, allow_nan=False) + "\n"
-    summary = (
+    identity = (
         f"Hub {report.get('name', report['node_id'])} ({report['node_id']}) at {report['timestamp']}\n"
+        if "node_id" in report
+        else ""
+    )
+    summary = (
+        identity
         + "\n".join(f"{name}: {result['status']}" for name, result in report["stages"].items())
-        + f"\ncloud_denial: {report['cloud_denial']['status']}\n"
+        + "\n"
+        + (f"cloud_denial: {report['cloud_denial']['status']}\n" if "cloud_denial" in report else "")
         + (f"prerequisite: {report['reason']}\n" if "reason" in report else "")
     )
     if any(secret in content + summary or json.dumps(secret)[1:-1] in content for secret in credentials()):
-        msg = "Credential detected in report; output refused"
-        raise ValueError(msg)
+        raise ReportRefusedError(REPORT_REFUSAL_REASON)
     prepare_output(directory)
     for suffix, text in (("json", content), ("txt", summary)):
         path = directory / f"{stem}.{suffix}"
@@ -476,6 +492,22 @@ def save_report(directory: Path, report: dict[str, Any]) -> None:
             path.chmod(0o600)
             stream.write(text)
     sys.stdout.write(content)
+
+
+def save_hub_report(directory: Path, report: dict[str, Any]) -> None:
+    """Retain stage outcomes when a hub's identifying data cannot be published."""
+    try:
+        save_report(directory, report)
+    except ReportRefusedError:
+        report["output_refused"] = True
+        stub = {
+            "stages": {name: {"status": report["stages"][name]["status"]} for name in STAGES},
+            "reason": REPORT_REFUSAL_REASON,
+        }
+        try:
+            save_report(directory, stub)
+        except ReportRefusedError:
+            sys.stderr.write("Diagnostic report withheld.\n")
 
 
 async def run(args: argparse.Namespace) -> int:
@@ -505,12 +537,14 @@ async def run(args: argparse.Namespace) -> int:
                 )
             finally:
                 reports.append(report)
-                await asyncio.to_thread(save_report, args.output, report)
+                await asyncio.to_thread(save_hub_report, args.output, report)
             if report["stages"]["restore"]["status"] == "RESTORE_FAILED":
                 break
 
     if any(r["stages"]["restore"]["status"] == "RESTORE_FAILED" for r in reports):
         return 3
+    if any(r.get("output_refused") for r in reports):
+        return 2
     if args.deny_cloud and any(r["cloud_denial"]["status"] != "verified" for r in reports):
         return 2
     required: tuple[str, ...] = ("handshake", "identity", "properties")
@@ -542,10 +576,11 @@ def main() -> int:
         parser.error("--discovery-seconds must be greater than zero and at most 60")
     previous_logging = logging.root.manager.disable
     logging.disable(logging.CRITICAL)
+    _RESTORE_FAILED.clear()
     try:
-        return asyncio.run(run(args))
-    except KeyboardInterrupt:
-        return 130
+        result = asyncio.run(run(args))
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        result = 130
     except Exception as exc:
         report = new_report("unavailable")
         report["prerequisite_failure"] = type(exc).__name__
@@ -555,9 +590,10 @@ def main() -> int:
         except Exception:
             with suppress(Exception):
                 sys.stderr.write("Diagnostic failed; unable to write a safe report. Check output access.\n")
-        return 2
+        result = 2
     finally:
         logging.disable(previous_logging)
+    return 3 if _RESTORE_FAILED.is_set() else result
 
 
 if __name__ == "__main__":

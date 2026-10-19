@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   metadata, explain missing prerequisites safely, and summarize text artifacts.
 - Preserve IPv6 interface scopes under process cloud denial and try alternative
   discovered addresses for reads without retrying writes on another endpoint.
+- Preserve restoration-failure exit status across interrupts and report refusals;
+  retain safe stage-status stubs and restore after uncertain writes even when an
+  initial read is unchanged. Remove private ID-token capture from the diagnostic.
 
 ## [0.3.0b3] - 2026-10-18
 

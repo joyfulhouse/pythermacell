@@ -140,13 +140,17 @@ firmware/values are labeled separately; snapshots can differ with timing.
 or missing LED parameters. It changes only `LED Brightness` by one unit, checks
 local readback, and restores the original brightness in `finally`, including
 after an uncertain write or cancellation. It then verifies **all** original LED
-values. Cleanup first reads the current settings: `verified_unchanged` means
-they already match the snapshot and no restore write was needed. Repeated task
-cancellation cannot interrupt the bounded cleanup attempt. Saturation is
-captured and checked but never sent, per
+values. After a definite device rejection of the change write,
+`verified_unchanged` means a local read matches the snapshot and no restore write
+was needed. After an uncertain write, cleanup writes the original brightness
+even if its initial read appears unchanged, then verifies by readback. Repeated
+asyncio task cancellation is shielded, but a second real Ctrl-C during an active
+restore can abandon cleanup: that failure prints `RESTORE_FAILED` with the
+original values and exits 3. Allow cleanup to finish after the first Ctrl-C.
+Saturation is captured and checked but never sent, per
 [LED control](LED_CONTROL.md). No power, refill, schedule, timer, reboot or OTA
-commands are issued. Allow cleanup to finish after Ctrl-C; SIGKILL, machine loss,
-or loss of hub connectivity cannot guarantee restoration. `RESTORE_FAILED` is
+commands are issued. SIGKILL, machine loss, or loss of hub connectivity cannot
+guarantee restoration. `RESTORE_FAILED` is
 printed with the original LED values and stops further hub writes. Do not rerun
 write mode until restoration has been resolved.
 
@@ -156,17 +160,25 @@ responses, authentication data, cookies, and exception messages are excluded.
 Names and firmware accept only bounded strings or integers; structured metadata
 is marked `<invalid type>`. Known credentials are redacted from those strings.
 Before writing either artifact or stdout, a narrow self-check refuses output
-containing a loaded account username/password, access/ID token, PoP, or local
-username. This also checks JSON-escaped values. It does not detect unknown or
+containing a loaded account username/password, access token, PoP, or local
+username. The transient ID token is not stored by the library or exposed to this
+diagnostic; it is never projected into report fields. The check also covers
+JSON-escaped values. It does not detect unknown or
 transformed secrets, inspect other logs, or revoke credentials. Output access is
 checked before hub operations. A safe prerequisite reason distinguishes missing
 credentials, optional zeroconf, unknown account nodes, and authentication/network
-failures; external exception messages remain withheld.
+failures; external exception messages remain withheld. A refused hub report is
+replaced by a minimal stage-status stub with the refusal reason, omitting its
+identity, timestamp, and values. Other hubs can still be checked. If even the
+constant stub text matches a credential, it too is withheld without bypassing
+the self-check. Any refusal makes the run unsuccessful; a restoration failure
+still stops later writes and takes exit-code precedence.
 Normal and third-party logs are disabled by the standalone command. Exit status
 is 0 for all requested stages passing, 2 for missing prerequisites/unsupported
-or failed stages, 3 for restoration failure, and 130 for interruption after
-cleanup. The cleanup attempt has a 45-second bound; initial local reads and LED
-write/readback have separate 30-second bounds.
+or failed stages, 3 whenever a restoration failure was recorded (including
+during interruption or reporting failure), and 130 for interruption without a
+recorded restoration failure. The cleanup attempt has a 45-second bound; initial
+local reads and LED write/readback have separate 30-second bounds.
 
 `--deny-cloud` restricts TCP connects **inside this process** to discovered hub
 addresses/ports, and attempts a fresh cloud HTTPS request to verify the guard.
@@ -241,12 +253,18 @@ prerequisites. Cloud denial is verified with six blocked TCP connects; no live
 device writes were requested or sent. The cloud LED baselines remain 75/240/100
 (brightness/hue/saturation), with no changed/restored values.
 
-The final documentation commit uses this same diagnostic source. Its exact
+The round-1 documentation commit `af16ff66b14b34545b64dde77595653692c80d6c`
+uses this same diagnostic source. Its exact
 checkout SHA and source digest are recorded separately in
 `fix-r1/final-head-readonly.log` and `fix-r1/final-head-denial.log` under the
 artifact directory, alongside per-hub JSON/text reports. These final-head runs
 are also read-only. `LIVE-EVIDENCE.md` records the final checkout provenance and
 distinguishes it from the historical runs.
+
+Round-2 follow-up evidence is retained under `fix-r2/` in the same artifact
+directory. Its `final-head-denial.log` records the executed checkout SHA and
+imported diagnostic source hash for the read-only run with process cloud denial;
+`LIVE-EVIDENCE.md` records the per-hub results.
 
 ### Offline Startup Assessment
 
