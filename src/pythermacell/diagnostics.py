@@ -215,15 +215,20 @@ def led_settings(config: dict[str, Any], params: dict[str, Any]) -> dict[str, An
 
 async def restore_led(transport: LocalTransport, original: dict[str, Any], report: dict[str, Any]) -> None:
     """Restore only the changed brightness and verify the entire LED snapshot."""
+    write_details = {}
     try:
-        async with asyncio.timeout(45):
+        async with asyncio.timeout(30):
             await transport.write({DEVICE_TYPE_LIV_HUB: {"LED Brightness": original["LED Brightness"]}})
+    except (Exception, asyncio.CancelledError) as exc:
+        write_details["write_error_type"] = type(exc).__name__
+    try:
+        async with asyncio.timeout(15):
             config, params = await transport.read()
             restored = led_settings(config, params)
             status = "passed" if restored == original else "RESTORE_FAILED"
-            stage(report, "restore", status, values=restored)
+            stage(report, "restore", status, values=restored, **write_details)
     except (Exception, asyncio.CancelledError) as exc:
-        stage(report, "restore", "RESTORE_FAILED", error_type=type(exc).__name__)
+        stage(report, "restore", "RESTORE_FAILED", error_type=type(exc).__name__, **write_details)
     if report["stages"]["restore"]["status"] == "RESTORE_FAILED":
         report["stages"]["restore"]["original_values"] = original
         sys.stderr.write(

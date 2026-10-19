@@ -17,7 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Keep LED restoration shielded through repeated cancellation; always write the
   original brightness and verify it, including after HTTP/protocol errors that
-  may follow a dispatched change.
+  may follow a dispatched change. Verify even after a refused/failed restore
+  write and decide restoration from readback, so unchanged read-only hubs continue.
 - Fail closed on diagnostic output errors and known credential leaks; validate
   metadata, explain missing prerequisites safely, and summarize text artifacts.
 - Preserve IPv6 interface scopes under process cloud denial and try alternative

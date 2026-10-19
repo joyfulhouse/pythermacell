@@ -83,10 +83,9 @@ class DiagnosticPeer(HubPeer):
             assert packet.msg == 6
             payload = json.loads(packet.cmd_set_prop_vals.props[0].value)
             self.writes.append(payload)
+            self.params["LIV Hub"].update(payload["LIV Hub"])
             reply.msg = 7
-            reply.resp_set_prop_vals.status = int(self.reject and payload["LIV Hub"]["LED Brightness"] != 75)
-            if not reply.resp_set_prop_vals.status:
-                self.params["LIV Hub"].update(payload["LIV Hub"])
+            reply.resp_set_prop_vals.status = 0
         return web.Response(body=reply.SerializeToString())
 
 
@@ -149,7 +148,7 @@ async def test_unsafe_or_unsupported_nodes_never_write(diagnostic_peer: Any, fai
     report = await diagnose(peer, record, services, write=True)
     assert not peer.writes
     assert report["stages"]["led_write"]["status"] != "passed"
-    assert report["stages"]["restore"]["status"] == ("RESTORE_FAILED" if failure == "readonly" else "not_performed")
+    assert report["stages"]["restore"]["status"] == ("passed" if failure == "readonly" else "not_performed")
     if failure == "identity":
         assert report["stages"]["handshake"]["status"] == "passed"
         assert report["stages"]["identity"]["status"] == "failed"
@@ -226,6 +225,7 @@ async def test_restore_failure_is_loud(failure: str, capsys: pytest.CaptureFixtu
         peer.params["LIV Hub"]["LED Hue"] = 241
     report = diagnostics.new_report("hub")
     await diagnostics.restore_led(transport, original, report)
+    transport.read.assert_awaited_once()
     assert report["stages"]["restore"]["status"] == "RESTORE_FAILED"
     assert report["stages"]["restore"]["original_values"] == original
     err = capsys.readouterr().err
@@ -366,7 +366,8 @@ async def test_rejected_write_continues_to_next_hub(
     diagnostic_peer: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     peer, record, services = diagnostic_peer
-    peer.reject = True
+    peer.readonly = True
+    original = deepcopy(peer.params["LIV Hub"])
     monkeypatch.setattr(
         diagnostics,
         "account_nodes",
@@ -375,8 +376,8 @@ async def test_rejected_write_continues_to_next_hub(
     monkeypatch.setattr(diagnostics, "discover", AsyncMock(return_value=[record]))
     args = argparse.Namespace(output=tmp_path, discovery_seconds=1, node_id=None, write_led=True, deny_cloud=False)
     assert await diagnostics.run(args) == 2
-    assert peer.writes == [{"LIV Hub": {"LED Brightness": 74}}, {"LIV Hub": {"LED Brightness": 75}}] * 2
-    assert peer.params["LIV Hub"]["LED Brightness"] == 75
+    assert not peer.writes
+    assert peer.params["LIV Hub"] == original
     assert "RESTORE_FAILED" not in capsys.readouterr().err
 
     def reports() -> list[dict[str, Any]]:
@@ -384,7 +385,10 @@ async def test_rejected_write_continues_to_next_hub(
 
     saved = await asyncio.to_thread(reports)
     assert len(saved) == 2
-    assert all(report["stages"]["restore"]["status"] == "passed" for report in saved)
+    assert all(
+        report["stages"]["restore"] == {"status": "passed", "values": original, "write_error_type": "DeviceError"}
+        for report in saved
+    )
 
 
 async def test_interrupted_restore_reports_exact_originals(capsys: pytest.CaptureFixture[str]) -> None:
@@ -559,7 +563,7 @@ async def test_write_failure_never_tries_another_address(diagnostic_peer: Any, m
     monkeypatch.setattr(services, "local_endpoint", track)
     peer.readonly = True
     report = await diagnose(peer, record, services, write=True)
-    assert report["stages"]["restore"]["status"] == "RESTORE_FAILED"
+    assert report["stages"]["restore"]["status"] == "passed"
     assert attempted == ["127.0.0.1"]
 
 
@@ -857,3 +861,26 @@ async def test_post_dispatch_error_restores_after_stale_read(
         assert report["stages"]["restore"] == {"status": "passed", "values": before}
         assert "RESTORE_FAILED" not in capsys.readouterr().err
     assert peer.writes == [{"LIV Hub": {"LED Brightness": 74}}, {"LIV Hub": {"LED Brightness": 75}}]
+
+
+@pytest.mark.parametrize("failure", [DeviceError, TimeoutError, asyncio.CancelledError])
+async def test_restore_write_error_still_verifies(
+    failure: type[BaseException], capsys: pytest.CaptureFixture[str]
+) -> None:
+    peer = DiagnosticPeer()
+    original = deepcopy(peer.params["LIV Hub"])
+    transport = AsyncMock(spec=LocalTransport)
+    transport.write.side_effect = failure("hidden-write-error")
+    transport.read.return_value = (peer.config, peer.params)
+    report = diagnostics.new_report("hub")
+    await diagnostics.restore_led(transport, original, report)
+    transport.write.assert_awaited_once_with({"LIV Hub": {"LED Brightness": 75}})
+    transport.read.assert_awaited_once()
+    assert report["stages"]["restore"] == {
+        "status": "passed",
+        "values": original,
+        "write_error_type": failure.__name__,
+    }
+    assert not diagnostics._RESTORE_FAILED.is_set()
+    assert not capsys.readouterr().err
+    assert "hidden-write-error" not in json.dumps(report)

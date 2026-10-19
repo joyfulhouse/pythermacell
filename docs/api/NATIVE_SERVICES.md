@@ -142,9 +142,11 @@ local readback, and restores the original brightness in `finally`, including
 after an uncertain write or cancellation. It then verifies **all** original LED
 values. Every attempted change is followed by a restore write and readback,
 including after `DeviceError`: HTTP/protocol errors can occur after dispatch
-and do not prove rejection. A rejected change can still finish with restoration
-verified and continue to later hubs. If the restore write or verification itself
-fails, including refusal by a read-only property, it reports `RESTORE_FAILED`. Repeated
+and do not prove rejection. Verification readback is attempted even if the restore
+write fails or is refused; only readback determines the outcome. Exact original
+LED values mean restoration passed, with any write error's type recorded separately.
+This lets fully read-only hubs continue to later hubs. A mismatching or failed
+readback reports `RESTORE_FAILED`. Repeated
 asyncio task cancellation is shielded, but a second real Ctrl-C during an active
 restore can abandon cleanup: that failure prints `RESTORE_FAILED` with the
 original values and exits 3. Allow cleanup to finish after the first Ctrl-C.
@@ -178,8 +180,9 @@ Normal and third-party logs are disabled by the standalone command. Exit status
 is 0 for all requested stages passing, 2 for missing prerequisites/unsupported
 or failed stages, 3 whenever a restoration failure was recorded (including
 during interruption or reporting failure), and 130 for interruption without a
-recorded restoration failure. The cleanup attempt has a 45-second bound; initial
-local reads and LED write/readback have separate 30-second bounds.
+recorded restoration failure. Cleanup allows 30 seconds for the restore write and
+15 seconds for verification, preserving the 45-second bound. Initial local reads
+and LED write/readback have separate 30-second bounds.
 
 `--deny-cloud` restricts TCP connects **inside this process** to discovered hub
 addresses/ports, and attempts a fresh cloud HTTPS request to verify the guard.
