@@ -7,6 +7,8 @@
 Implemented in 0.3.0b1. Contracts come from LIV Android 4.0.5, versionCode
 202, and ESP RainMaker CLI commit `dee32b620f5c6307fd572c2836e674b81b60c819`.
 Validation uses local HTTP peers; no live hub commands were sent for this release.
+For the subsequent opt-in live spike and its limitations, see
+[LAN diagnostics](#lan-diagnostic-spike).
 
 ## Capabilities
 
@@ -90,6 +92,186 @@ group discovery and OTA remain cloud operations.
 
 The `.proto` schema and typed SRP adaptation carry Espressif's Apache-2.0
 notice; the license is included in `pythermacell/_proto/LICENSE`.
+
+## LAN Diagnostic Spike
+
+Run from a host on the hubs' LAN with multicast DNS visibility. A pod network
+address or working cloud DNS does not establish that visibility. The hub must
+advertise `_esp_local_ctrl._tcp.local.` with a TXT `node_id` belonging to the
+account, and its cloud config/params must supply `esp.service.local_control`
+security metadata. The tool does not invent endpoints, PoP, or security modes.
+
+The optional discovery dependency is `zeroconf` (validated with latest stable
+0.151.5 on 2026-10-18). It is needed only for this diagnostic, not normal library
+use. From the repository, with `THERMACELL_USERNAME` and `THERMACELL_PASSWORD`
+in an existing private environment file:
+
+```bash
+# Read-only first; no device parameter writes.
+uv run --with zeroconf --env-file /private/thermacell.env \
+  python -m pythermacell.diagnostics --output /private/lan-results
+
+# Only after a supported hub passes the read-only stages:
+uv run --with zeroconf --env-file /private/thermacell.env \
+  python -m pythermacell.diagnostics --output /private/lan-results \
+  --node-id ACCOUNT_NODE_ID --write-led
+
+# Actual process-scoped denial after fetching cloud prerequisites:
+uv run --with zeroconf --env-file /private/thermacell.env \
+  python -m pythermacell.diagnostics --output /private/lan-results --deny-cloud
+```
+
+Environment variables may instead be supplied by a secret manager; omit
+`--env-file` in that case. Do not put credentials in command arguments. Discovery
+waits 10 seconds by default; `--discovery-seconds` accepts up to 60 seconds.
+`--node-id` selects one account node; omission checks each node sequentially.
+
+Cloud use is explicitly limited to account membership, local-control metadata,
+firmware, and a baseline parameter snapshot. Cloud sessions close before the
+LAN phase. The diagnostic uses a `LocalTransport` subclass that observes the
+existing protocol; it never registers a cloud-fallback transport. Each artifact
+reports discovery (host, all addresses, port, TXT node ID), metadata (security,
+Security 2 patch version when available, credential **presence only**), handshake,
+identity, properties, LED write, readback, and restoration independently.
+`not_performed` means that stage was not reached, not success. Cloud and local
+firmware/values are labeled separately; snapshots can differ with timing.
+
+`--write-led` captures all advertised/current LED settings and refuses unknown
+or missing LED parameters. It changes only `LED Brightness` by one unit, checks
+local readback, and restores the original brightness in `finally`, including
+after an uncertain write or cancellation. It then verifies **all** original LED
+values. Every attempted change is followed by a restore write and readback,
+including after `DeviceError`: HTTP/protocol errors can occur after dispatch
+and do not prove rejection. Verification readback is attempted even if the restore
+write fails or is refused. A restore-write error remains `RESTORE_FAILED` even
+when readback matches: the read could be stale. Only a typed pre-dispatch read-only
+refusal of the initial change allows an unchanged readback to confirm safety.
+This lets fully read-only hubs continue to later hubs. A mismatching or failed
+readback also reports `RESTORE_FAILED`. Repeated
+asyncio task cancellation is shielded, but a second real Ctrl-C during an active
+restore can abandon cleanup: that failure prints `RESTORE_FAILED` with the
+original values and exits 3. Allow cleanup to finish after the first Ctrl-C.
+Saturation is captured and checked but never sent, per
+[LED control](LED_CONTROL.md). No power, refill, schedule, timer, reboot or OTA
+commands are issued. SIGKILL, machine loss, or loss of hub connectivity cannot
+guarantee restoration. `RESTORE_FAILED` is
+printed with the original LED values and stops further hub writes. Do not rerun
+write mode until restoration has been resolved.
+
+JSON and human-readable text artifacts are timestamped per node in a mode-0700
+directory, with mode-0600 files. Reports project only selected fields; raw cloud
+responses, authentication data, cookies, and exception messages are excluded.
+Names and firmware accept only bounded strings or integers; structured metadata
+is marked `<invalid type>`. Known credentials are redacted from those strings.
+Before writing either artifact or stdout, a narrow self-check refuses output
+containing a loaded account username/password, access token, PoP, or local
+username. The transient ID token is not stored by the library or exposed to this
+diagnostic; it is never projected into report fields. The check also covers
+JSON-escaped values. It does not detect unknown or
+transformed secrets, inspect other logs, or revoke credentials. Output access is
+checked before hub operations. A safe prerequisite reason distinguishes missing
+credentials, optional zeroconf, unknown account nodes, and authentication/network
+failures; external exception messages remain withheld. A refused hub report is
+replaced by a minimal stage-status stub with the refusal reason, omitting its
+identity, timestamp, and values. Other hubs can still be checked. If even the
+constant stub text matches a credential, it too is withheld without bypassing
+the self-check. Any refusal makes the run unsuccessful; a restoration failure
+still stops later writes and takes exit-code precedence.
+Normal and third-party logs are disabled by the standalone command. Exit status
+is 0 for all requested stages passing, 2 for missing prerequisites/unsupported
+or failed stages, 3 whenever a restoration failure was recorded (including
+during interruption or reporting failure), and 130 for interruption without a
+recorded restoration failure. Cleanup allows 30 seconds for the restore write and
+15 seconds for verification, preserving the 45-second bound. Initial local reads
+and LED write/readback have separate 30-second bounds.
+
+`--deny-cloud` restricts TCP connects **inside this process** to discovered hub
+addresses/ports, and attempts a fresh cloud HTTPS request to verify the guard.
+It never changes DNS, router, or firewall settings. DNS resolution itself is
+allowed. An unverified guard disables LED writes. Reports distinguish a verified
+blocked connection from merely selecting `LocalTransport`. A missing LAN
+endpoint still prevents proving local reads/writes during a cloud outage.
+IPv6 scope names and numeric socket scope IDs refer to the same interface; other
+scopes remain denied. Reads try discovered addresses in order of IPv4, global
+(or unique-local) IPv6, then link-local IPv6. Each candidate has a 30-second read
+bound. LED writes and their restoration stay on the successfully read endpoint;
+an uncertain write is never retried at another address.
+
+### If a Secret Leaks
+
+Stop sharing the affected artifacts and restrict or remove exposed copies,
+including CI logs and downloads. Change the cloud account password and invalidate
+affected sessions/tokens using supported account or vendor controls. Existing
+tokens may remain valid for their remaining lifetime even after a password change;
+do not assume password rotation revokes them. Local PoP/username rotation may
+require reprovisioning through vendor-supported procedures and is vendor-dependent.
+Verify that old credentials no longer authenticate before resuming sharing.
+
+There is no comprehensive automated leak detection or revocation here. The output
+self-check only compares against credentials loaded by this process. Consider
+separate secret scanning for the artifact directory before publication. Detection
+and revocation response times are operator-dependent and unmeasured.
+
+### Live Result, 2026-10-18 through 2026-10-19
+
+Read-only diagnostics ran on LAN-connected homelab hosts using existing account
+credentials. Neither account hub advertised `esp.service.local_control`.
+
+| Stage | ADU | Pool |
+|---|---|---|
+| Fresh cloud firmware | 5.4.7 | 5.4.7 |
+| Local-control service metadata | Not advertised | Not advertised |
+| Security scheme / local credentials | Unavailable / absent | Unavailable / absent |
+| Matching local mDNS endpoint | Not found | Not found |
+| Handshake / local identity / local properties | Not performed | Not performed |
+| LED write / readback / restore | Not performed | Not performed |
+| Successful transport | Cloud baseline only | Cloud baseline only |
+| Process-scoped cloud denial | Verified, six blocked connects | Verified, same process |
+
+Both cloud LED baselines were brightness 75, hue 240, saturation 100. No live
+device writes were sent. Local operation during cloud denial remains unproven.
+
+A subsequent read-only UniFi investigation found eleven unnamed Espressif
+candidates on the IoT network. All answered ping and refused TCP 80, 443, and
+8080; packet captures showed client-originated RST+ACK responses. Direct-segment
+multicast and unicast mDNS found no RainMaker local-control service. Neither
+ADU nor Pool was conclusively matched to a client, and this was not an exhaustive
+port scan or proven exhaustive candidate set. These results establish that no
+local connectivity was achieved, not that either hub has no listening ports.
+
+A supported hub must expose an enabled local service with account-provisioned
+security/credentials and a verified node identity. The observations do not prove
+that firmware can never support LAN control and do not demonstrate local protocol
+interoperability. See [issue #72](https://github.com/joyfulhouse/pythermacell/issues/72)
+and the companion [HA issue #33](https://github.com/joyfulhouse/thermacell_liv/issues/33).
+
+### Offline Startup Assessment
+
+- **Startup today:** normal client initialization authenticates to the cloud and
+  discovers account nodes. This diagnostic also needs cloud bootstrap on every
+  invocation. Neither securely persists local credentials or endpoints.
+- **Runtime cloud outage:** already configured transports can read cached hubs
+  directly; read failures may fall back to cloud. This remains simulator-tested
+  for these hubs because no live local endpoint was available.
+- **Offline restart:** not supported. A follow-up needs secure persistence of
+  account-bound node identity, advertised security, PoP/username, and endpoint
+  hints, plus a local-first startup path that does not require cloud login.
+- **Address changes:** treat saved addresses as hints; rediscover using mDNS TXT
+  identity and verify authenticated `config.node_id` before using a new endpoint.
+  Never associate hubs by friendly name or address alone.
+- **Credential rotation:** refresh local credentials from the authenticated
+  account when available, invalidate failed credentials, and explicitly report
+  that reprovisioning requires cloud access. Never downgrade advertised security.
+- **Fallback semantics:** preserve cloud fallback for failed reads and explicit
+  transport selection. Never replay an uncertain local write through cloud.
+  Offline mode must surface unavailable cloud-only operations honestly.
+
+Tracked follow-up: [secure offline bootstrap #76](https://github.com/joyfulhouse/pythermacell/issues/76).
+
+First obtain firmware/provisioning evidence for an advertised local service and
+repeat this spike, including LED restoration and denied-cloud local reads. Scope
+secure persistence/local-first bootstrap as a separate change after that proof;
+this PR does not implement offline bootstrap or alter HA startup.
 
 ## Refill Values
 

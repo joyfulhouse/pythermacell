@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0b5] - 2026-10-20
+
+### Added
+- Opt-in LAN diagnostic with independent discovery/authentication/identity/read
+  reporting, redacted artifacts, process-scoped cloud denial, and an explicit
+  LED brightness write mode with verified finally restoration (Refs #72).
+- Document live firmware 5.4.7 results for ADU/Pool: no advertised local-control
+  metadata or matching mDNS endpoint; no live local reads or writes claimed.
+
+### Fixed
+- Keep LED restoration shielded through repeated cancellation; always write the
+  original brightness and verify it, including after HTTP/protocol errors that
+  may follow a dispatched change. Verify even after a refused/failed restore
+  write; failed restoration remains unconfirmed even with matching stale reads.
+  Only a typed pre-dispatch read-only refusal permits unchanged-state confirmation.
+- Refuse LED mutations when the snapshot contains a known credential and redact
+  restoration failure alerts, including numeric proof-of-possession values.
+- Fail closed on diagnostic output errors and known credential leaks; validate
+  metadata, explain missing prerequisites safely, and summarize text artifacts.
+- Preserve IPv6 interface scopes under process cloud denial and try alternative
+  discovered addresses for reads without retrying writes on another endpoint.
+- Preserve restoration-failure exit status across interrupts and report refusals;
+  retain safe stage-status stubs. Remove private ID-token capture from the diagnostic.
+
 ## [0.3.0b4] - 2026-10-19
 
 ### Fixed
