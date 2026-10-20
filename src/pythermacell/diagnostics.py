@@ -26,7 +26,7 @@ from pythermacell.auth import AuthenticationHandler
 from pythermacell.client import ThermacellClient
 from pythermacell.const import DEFAULT_BASE_URL, DEVICE_TYPE_LIV_HUB, LED_BRIGHTNESS_MAX
 from pythermacell.exceptions import AuthenticationError, ThermacellConnectionError, ThermacellTimeoutError
-from pythermacell.local import SERVICE_TYPE, LocalTransport
+from pythermacell.local import SERVICE_TYPE, LocalPropertyReadOnlyError, LocalTransport
 from pythermacell.parsers import parse_device_state
 from pythermacell.services import HubServices
 
@@ -213,7 +213,9 @@ def led_settings(config: dict[str, Any], params: dict[str, Any]) -> dict[str, An
     return values
 
 
-async def restore_led(transport: LocalTransport, original: dict[str, Any], report: dict[str, Any]) -> None:
+async def restore_led(
+    transport: LocalTransport, original: dict[str, Any], report: dict[str, Any], *, not_dispatched: bool = False
+) -> None:
     """Restore only the changed brightness and verify the entire LED snapshot."""
     write_details = {}
     try:
@@ -225,14 +227,17 @@ async def restore_led(transport: LocalTransport, original: dict[str, Any], repor
         async with asyncio.timeout(15):
             config, params = await transport.read()
             restored = led_settings(config, params)
-            status = "passed" if restored == original else "RESTORE_FAILED"
+            # A stale read cannot certify an uncertain mutation when restoration failed.
+            status = "passed" if restored == original and (not write_details or not_dispatched) else "RESTORE_FAILED"
             stage(report, "restore", status, values=restored, **write_details)
     except (Exception, asyncio.CancelledError) as exc:
         stage(report, "restore", "RESTORE_FAILED", error_type=type(exc).__name__, **write_details)
     if report["stages"]["restore"]["status"] == "RESTORE_FAILED":
         report["stages"]["restore"]["original_values"] = original
         sys.stderr.write(
-            "RESTORE_FAILED: STOP all further writes; original LED settings: " + json.dumps(original) + "\n"
+            "RESTORE_FAILED: STOP all further writes; original LED settings: "
+            + metadata_value(json.dumps(original))
+            + "\n"
         )
 
 
@@ -240,6 +245,8 @@ async def exercise_led(transport: LocalTransport, report: dict[str, Any]) -> Non
     """Perform one brightness write with verified finally cleanup, even on cancellation."""
     config, params = await transport.read()
     original = led_settings(config, params)
+    if any(secret in json.dumps(original) for secret in credentials()):
+        raise ReportRefusedError(REPORT_REFUSAL_REASON)
     writable = any(
         p.get("name") == "LED Brightness" and "write" in p.get("properties", [])
         for device in config.get("devices", [])
@@ -252,6 +259,7 @@ async def exercise_led(transport: LocalTransport, report: dict[str, Any]) -> Non
         return
     changed = brightness - 1 if brightness else 1
     report["led_before"] = original
+    not_dispatched = False
     try:
         async with asyncio.timeout(30):
             await transport.write({DEVICE_TYPE_LIV_HUB: {"LED Brightness": changed}})
@@ -260,11 +268,14 @@ async def exercise_led(transport: LocalTransport, report: dict[str, Any]) -> Non
             actual = led_settings(config, params)
             expected = {**original, "LED Brightness": changed}
             stage(report, "led_readback", "passed" if actual == expected else "failed", values=actual)
+    except LocalPropertyReadOnlyError as exc:
+        not_dispatched = True
+        stage(report, "led_write", "unsupported", error_type=type(exc).__name__)
     except Exception as exc:
         stage(report, "led_write", "failed_or_uncertain", error_type=type(exc).__name__)
     finally:
         # A cancelled/uncertain command may already have reached the hub.
-        cleanup = asyncio.create_task(restore_led(transport, original, report))
+        cleanup = asyncio.create_task(restore_led(transport, original, report, not_dispatched=not_dispatched))
         cancelled = False
         while not cleanup.done():
             try:

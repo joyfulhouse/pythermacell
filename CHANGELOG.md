@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0b5] - 2026-10-20
+
 ### Added
 - Opt-in LAN diagnostic with independent discovery/authentication/identity/read
   reporting, redacted artifacts, process-scoped cloud denial, and an explicit
@@ -18,7 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Keep LED restoration shielded through repeated cancellation; always write the
   original brightness and verify it, including after HTTP/protocol errors that
   may follow a dispatched change. Verify even after a refused/failed restore
-  write and decide restoration from readback, so unchanged read-only hubs continue.
+  write; failed restoration remains unconfirmed even with matching stale reads.
+  Only a typed pre-dispatch read-only refusal permits unchanged-state confirmation.
+- Refuse LED mutations when the snapshot contains a known credential and redact
+  restoration failure alerts, including numeric proof-of-possession values.
 - Fail closed on diagnostic output errors and known credential leaks; validate
   metadata, explain missing prerequisites safely, and summarize text artifacts.
 - Preserve IPv6 interface scopes under process cloud denial and try alternative

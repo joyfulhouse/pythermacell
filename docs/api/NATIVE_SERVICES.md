@@ -143,10 +143,11 @@ after an uncertain write or cancellation. It then verifies **all** original LED
 values. Every attempted change is followed by a restore write and readback,
 including after `DeviceError`: HTTP/protocol errors can occur after dispatch
 and do not prove rejection. Verification readback is attempted even if the restore
-write fails or is refused; only readback determines the outcome. Exact original
-LED values mean restoration passed, with any write error's type recorded separately.
+write fails or is refused. A restore-write error remains `RESTORE_FAILED` even
+when readback matches: the read could be stale. Only a typed pre-dispatch read-only
+refusal of the initial change allows an unchanged readback to confirm safety.
 This lets fully read-only hubs continue to later hubs. A mismatching or failed
-readback reports `RESTORE_FAILED`. Repeated
+readback also reports `RESTORE_FAILED`. Repeated
 asyncio task cancellation is shielded, but a second real Ctrl-C during an active
 restore can abandon cleanup: that failure prints `RESTORE_FAILED` with the
 original values and exits 3. Allow cleanup to finish after the first Ctrl-C.
@@ -211,64 +212,38 @@ self-check only compares against credentials loaded by this process. Consider
 separate secret scanning for the artifact directory before publication. Detection
 and revocation response times are operator-dependent and unmeasured.
 
-### Live Result, 2026-10-18
+### Live Result, 2026-10-18 through 2026-10-19
 
-These historical runs executed commit
-`5167a8af3841cfc4f76e6fd6bc10b2386c71786a`. The historical final-denial log does
-not contain a source digest; it must not be used as source-hash evidence.
-
-Read-only runs used existing account credentials from the homelab secret source,
-first on pod `server0` (`10.42.1.31`) and then through existing SSH access to
-physical `server0` (`172.16.1.128`). The physical host observed 54 mDNS service
-types, including Home Assistant and other ESP devices, confirming multicast
-visibility there. No `_esp_local_ctrl._tcp.local.` service appeared during the
-20-second diagnostic browse or the independent service-type browse.
+Read-only diagnostics ran on LAN-connected homelab hosts using existing account
+credentials. Neither account hub advertised `esp.service.local_control`.
 
 | Stage | ADU | Pool |
 |---|---|---|
 | Fresh cloud firmware | 5.4.7 | 5.4.7 |
 | Local-control service metadata | Not advertised | Not advertised |
-| Security / PoP / username | Unavailable / absent / absent | Unavailable / absent / absent |
+| Security scheme / local credentials | Unavailable / absent | Unavailable / absent |
 | Matching local mDNS endpoint | Not found | Not found |
 | Handshake / local identity / local properties | Not performed | Not performed |
 | LED write / readback / restore | Not performed | Not performed |
+| Successful transport | Cloud baseline only | Cloud baseline only |
 | Process-scoped cloud denial | Verified, six blocked connects | Verified, same process |
 
-Both cloud baselines reported brightness 75, hue 240, saturation 100, repellers
-disabled, state/status 1, error 0, refill life 0. No live device writes were sent.
-The precise remaining prerequisite is a hub exposing an enabled RainMaker local
-service with account-provisioned security/credentials and a matching mDNS endpoint.
-These observations do not prove that firmware can never support LAN control,
-and do not demonstrate local protocol interoperability. No transport defect was
-established by these traces, so the existing wire implementation is unchanged.
-Artifacts are retained outside git at
-`/data/projects/joyfulhouse/_artifacts/thermacell-lan-spike-20261018/`.
+Both cloud LED baselines were brightness 75, hue 240, saturation 100. No live
+device writes were sent. Local operation during cloud denial remains unproven.
 
-### Read-Only Rerun, 2026-10-19
+A subsequent read-only UniFi investigation found eleven unnamed Espressif
+candidates on the IoT network. All answered ping and refused TCP 80, 443, and
+8080; packet captures showed client-originated RST+ACK responses. Direct-segment
+multicast and unicast mDNS found no RainMaker local-control service. Neither
+ADU nor Pool was conclusively matched to a client, and this was not an exhaustive
+port scan or proven exhaustive candidate set. These results establish that no
+local connectivity was achieved, not that either hub has no listening ports.
 
-After the tribunal fixes, both normal and cloud-denied reads executed commit
-`d9eef09ebf812ae144fbaac8387fe7a45fbe06e2` on physical `server0`. Diagnostic
-source SHA256: `e760bc0a793ca8992cb4a0b9e411fa074b343d15546cc6a17e0672c2de2c56e8`.
-All 23 tracked runtime/dependency files were checked against the checkout before
-execution. ADU and Pool still report firmware 5.4.7, no local-control metadata,
-and no matching mDNS endpoint. Handshake, local identity, local properties, and
-all LED stages remain `not_performed`. Both commands exit 2 for these missing
-prerequisites. Cloud denial is verified with six blocked TCP connects; no live
-device writes were requested or sent. The cloud LED baselines remain 75/240/100
-(brightness/hue/saturation), with no changed/restored values.
-
-The round-1 documentation commit `af16ff66b14b34545b64dde77595653692c80d6c`
-uses this same diagnostic source. Its exact
-checkout SHA and source digest are recorded separately in
-`fix-r1/final-head-readonly.log` and `fix-r1/final-head-denial.log` under the
-artifact directory, alongside per-hub JSON/text reports. These final-head runs
-are also read-only. `LIVE-EVIDENCE.md` records the final checkout provenance and
-distinguishes it from the historical runs.
-
-Round-2 follow-up evidence is retained under `fix-r2/` in the same artifact
-directory. Its `final-head-denial.log` records the executed checkout SHA and
-imported diagnostic source hash for the read-only run with process cloud denial;
-`LIVE-EVIDENCE.md` records the per-hub results.
+A supported hub must expose an enabled local service with account-provisioned
+security/credentials and a verified node identity. The observations do not prove
+that firmware can never support LAN control and do not demonstrate local protocol
+interoperability. See [issue #72](https://github.com/joyfulhouse/pythermacell/issues/72)
+and the companion [HA issue #33](https://github.com/joyfulhouse/thermacell_liv/issues/33).
 
 ### Offline Startup Assessment
 
@@ -290,6 +265,8 @@ imported diagnostic source hash for the read-only run with process cloud denial;
 - **Fallback semantics:** preserve cloud fallback for failed reads and explicit
   transport selection. Never replay an uncertain local write through cloud.
   Offline mode must surface unavailable cloud-only operations honestly.
+
+Tracked follow-up: [secure offline bootstrap #76](https://github.com/joyfulhouse/pythermacell/issues/76).
 
 First obtain firmware/provisioning evidence for an advertised local service and
 repeat this spike, including LED restoration and denied-cloud local reads. Scope

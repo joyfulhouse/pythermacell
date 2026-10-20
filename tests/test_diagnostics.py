@@ -132,6 +132,57 @@ async def test_led_changes_one_value_and_restores_all(diagnostic_peer: Any) -> N
     assert report["stages"]["restore"] == {"status": "passed", "values": before["LIV Hub"]}
 
 
+async def test_queued_write_and_failed_restore_cannot_pass_stale_read(aiohttp_client: Any) -> None:
+    class DelayedPeer(DiagnosticPeer):
+        pending = False
+        fail_restore = False
+
+        async def control(self, request: web.Request) -> web.Response:
+            packet = LocalCtrlMessage.FromString(await request.read())
+            if packet.msg == 6:
+                self.pending = self.fail_restore = True
+                return web.Response(status=500)
+            if packet.msg == 4 and self.fail_restore:
+                self.fail_restore = False
+                return web.Response(status=500)
+            response = await super().control(request)
+            if packet.msg == 4 and self.pending:
+                self.params["LIV Hub"]["LED Brightness"] = 74
+                self.pending = False
+            return response
+
+    peer = DelayedPeer()
+    app = web.Application()
+    app.router.add_post("/esp_local_ctrl/session", peer.session)
+    app.router.add_post("/esp_local_ctrl/control", peer.control)
+    http = await aiohttp_client(app)
+    url = http.make_url("/")
+    record = {"node_id": "hub", "host": "test.local.", "port": url.port, "addresses": [url.host]}
+    state = parse_device_state("hub", peer.params, {}, peer.config)
+    report = await diagnose(peer, record, HubServices(MagicMock(), lambda: state), write=True)
+    assert report["stages"]["restore"]["values"]["LED Brightness"] == 75
+    assert peer.params["LIV Hub"]["LED Brightness"] == 74
+    assert report["stages"]["restore"]["status"] == "RESTORE_FAILED"
+    assert diagnostics._RESTORE_FAILED.is_set()
+
+
+async def test_numeric_secret_prevents_mutation_and_is_absent_from_restore_alert(
+    diagnostic_peer: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    peer, record, services = diagnostic_peer
+    diagnostics.remember_credentials("240")
+    report = await diagnose(peer, record, services, write=True)
+    assert not peer.writes
+    assert report["stages"]["led_write"]["error_type"] == "ReportRefusedError"
+    transport = AsyncMock(spec=LocalTransport)
+    transport.write.side_effect = TimeoutError
+    transport.read.return_value = (peer.config, peer.params)
+    await diagnostics.restore_led(transport, peer.params["LIV Hub"], report)
+    alert = capsys.readouterr().err
+    assert "RESTORE_FAILED" in alert
+    assert "240" not in alert
+
+
 @pytest.mark.parametrize("failure", ["identity", "missing_metadata", "readonly", "unknown_led", "missing_led"])
 async def test_unsafe_or_unsupported_nodes_never_write(diagnostic_peer: Any, failure: str) -> None:
     peer, record, services = diagnostic_peer
@@ -386,7 +437,8 @@ async def test_rejected_write_continues_to_next_hub(
     saved = await asyncio.to_thread(reports)
     assert len(saved) == 2
     assert all(
-        report["stages"]["restore"] == {"status": "passed", "values": original, "write_error_type": "DeviceError"}
+        report["stages"]["restore"]
+        == {"status": "passed", "values": original, "write_error_type": "LocalPropertyReadOnlyError"}
         for report in saved
     )
 
@@ -864,7 +916,7 @@ async def test_post_dispatch_error_restores_after_stale_read(
 
 
 @pytest.mark.parametrize("failure", [DeviceError, TimeoutError, asyncio.CancelledError])
-async def test_restore_write_error_still_verifies(
+async def test_restore_write_error_cannot_certify_matching_read(
     failure: type[BaseException], capsys: pytest.CaptureFixture[str]
 ) -> None:
     peer = DiagnosticPeer()
@@ -877,10 +929,11 @@ async def test_restore_write_error_still_verifies(
     transport.write.assert_awaited_once_with({"LIV Hub": {"LED Brightness": 75}})
     transport.read.assert_awaited_once()
     assert report["stages"]["restore"] == {
-        "status": "passed",
+        "status": "RESTORE_FAILED",
         "values": original,
+        "original_values": original,
         "write_error_type": failure.__name__,
     }
-    assert not diagnostics._RESTORE_FAILED.is_set()
-    assert not capsys.readouterr().err
+    assert diagnostics._RESTORE_FAILED.is_set()
+    assert "RESTORE_FAILED" in capsys.readouterr().err
     assert "hidden-write-error" not in json.dumps(report)

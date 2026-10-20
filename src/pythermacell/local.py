@@ -32,6 +32,10 @@ SECURITY_SRP = 2
 NONCE_BYTES = 12
 
 
+class LocalPropertyReadOnlyError(DeviceError):
+    """The params property refused a write before any mutation was dispatched."""
+
+
 @dataclass(frozen=True)
 class LocalEndpoint:
     """A discovered address paired with credentials from authenticated config."""
@@ -227,7 +231,7 @@ class LocalTransport:
             _, _, index = await self._properties()
             if index < 0:
                 msg = "Local params property is not writable"
-                raise DeviceError(msg)
+                raise LocalPropertyReadOnlyError(msg)
             request = LocalCtrlMessage(msg=6)
             prop = request.cmd_set_prop_vals.props.add()
             prop.index = index
