@@ -86,7 +86,9 @@ an attempted local write is never automatically replayed via cloud. A timeout
 could mean the hub applied the command. The next successful poll selects the
 appropriate transport. LAN discovery requires same-network mDNS visibility.
 Initial account authentication/discovery still requires cloud access; an existing
-session can poll cached local hubs during subsequent cloud outages. Schedules,
+session can poll cached local hubs during subsequent cloud outages. A rejected
+reauthentication (`AuthenticationError`) is never masked by cached membership;
+it propagates even when local transports are registered. Schedules,
 power, LED, reset, reboot and timezone use the selected parameter transport;
 group discovery and OTA remain cloud operations.
 

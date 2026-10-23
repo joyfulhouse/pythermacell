@@ -169,4 +169,4 @@ the property of their respective owners.
 
 ## Native Services and LAN Control
 
-Version 0.3.0b1 adds capability-driven timers, schedules, reboot, timezone, cloud OTA, and encrypted RainMaker local transport. See [verified contracts and examples](docs/api/NATIVE_SERVICES.md). This beta is validated against HTTP/protocol simulators; live hub validation remains outstanding.
+Version 0.3.0 adds capability-driven timers, schedules, reboot, timezone, cloud OTA, and encrypted RainMaker local transport. See [verified contracts and examples](docs/api/NATIVE_SERVICES.md). Native timers, power confirmation, and cloud services are validated on live hubs (firmware 5.4.7). **LAN control is experimental:** it is validated only against HTTP/protocol simulators because no tested firmware advertises local control; offline startup is unsupported ([#76](https://github.com/joyfulhouse/pythermacell/issues/76)).

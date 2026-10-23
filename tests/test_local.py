@@ -15,7 +15,7 @@ from pythermacell._proto.local_pb2 import LocalCtrlMessage, SessionData
 from pythermacell._srp import PRIME, WIDTH
 from pythermacell.api import ThermacellAPI
 from pythermacell.client import ThermacellClient
-from pythermacell.exceptions import DeviceError
+from pythermacell.exceptions import AuthenticationError, DeviceError
 from pythermacell.local import LocalEndpoint, LocalTransport
 
 
@@ -227,6 +227,17 @@ async def test_local_polling_survives_cloud_outage_and_preserves_failed_hub(loca
     client._fetch_device_state = AsyncMock(return_value=None)
     assert (await client.get_devices())[0] is device
     assert not device.is_online
+
+
+async def test_failed_reauthentication_never_uses_cached_membership(local_peer: Any) -> None:
+    _, transport, http = await local_peer()
+    client = ThermacellClient(username="test", password="test", session=http.session)
+    client.api.local_transports["hub"] = transport
+    client.api.get_nodes = AsyncMock(return_value=(200, {"nodes": ["hub"]}))
+    await client.get_devices()
+    client.api.get_nodes.side_effect = AuthenticationError("password changed")
+    with pytest.raises(AuthenticationError):
+        await client.get_devices()
 
 
 async def test_register_local_requires_active_session(local_peer: Any) -> None:

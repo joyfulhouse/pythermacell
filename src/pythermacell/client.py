@@ -188,6 +188,32 @@ class ThermacellClient:
         # Exit API context
         await self._api.__aexit__(exc_type, exc_val, exc_tb)
 
+    async def _get_node_ids(self) -> list[str]:
+        """Return account node IDs, using cached membership only during cloud outages.
+
+        Raises:
+            AuthenticationError: If credentials are rejected (never masked by cache).
+            DeviceError: If membership cannot be fetched and no cache applies.
+        """
+        try:
+            status, data = await self._api.get_nodes()
+        except AuthenticationError:
+            # Rejected credentials must surface, never hide behind cached membership.
+            raise
+        except Exception:
+            if not self._api.local_transports or not self._devices:
+                raise
+            return list(self._devices)
+
+        if status != HTTPStatus.OK or data is None:
+            if status >= HTTPStatus.INTERNAL_SERVER_ERROR and self._api.local_transports and self._devices:
+                return list(self._devices)
+            msg = f"Failed to get devices: HTTP {status}"
+            raise DeviceError(msg)
+
+        node_ids: list[str] = data.get("nodes", [])
+        return node_ids
+
     async def get_devices(self) -> list[ThermacellDevice]:
         """Get all devices for the authenticated user.
 
@@ -198,25 +224,11 @@ class ThermacellClient:
             List of ThermacellDevice instances with cached state.
 
         Raises:
+            AuthenticationError: If credentials are rejected.
             DeviceError: If device discovery fails.
             ThermacellConnectionError: If connection fails.
         """
-        # Get list of node IDs
-        try:
-            status, data = await self._api.get_nodes()
-        except Exception:
-            if not self._api.local_transports or not self._devices:
-                raise
-            status, data = HTTPStatus.OK, {"nodes": list(self._devices)}
-
-        if status != HTTPStatus.OK or data is None:
-            if status >= HTTPStatus.INTERNAL_SERVER_ERROR and self._api.local_transports and self._devices:
-                status, data = HTTPStatus.OK, {"nodes": list(self._devices)}
-            else:
-                msg = f"Failed to get devices: HTTP {status}"
-                raise DeviceError(msg)
-
-        node_ids = data.get("nodes", [])
+        node_ids = await self._get_node_ids()
         if not node_ids:
             return []
 
