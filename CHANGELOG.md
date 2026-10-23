@@ -7,10 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.3.0] - 2026-10-23
+## [0.3.1] - 2026-10-23
 
-First stable release of the 0.3 line (native services, verified power control,
-and experimental RainMaker LAN transport). Consolidates 0.3.0b1-0.3.0b5.
+First stable release of the 0.3 line. (Version 0.3.0 was never published:
+PyPI permanently reserves that previously deleted filename.) This
+release covers native services, verified power control, and experimental RainMaker LAN transport, consolidating 0.3.0b1-0.3.0b5.
 
 ### Fixed
 - A rejected cloud reauthentication (`AuthenticationError`) during device
