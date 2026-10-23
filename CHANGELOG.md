@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-23
+
+First stable release of the 0.3 line (native services, verified power control,
+and experimental RainMaker LAN transport). Consolidates 0.3.0b1-0.3.0b5.
+
+### Fixed
+- A rejected cloud reauthentication (`AuthenticationError`) during device
+  discovery is no longer masked by cached membership when local transports are
+  registered; it always propagates so callers can prompt for new credentials.
+
+### Changed
+- Bump cryptography to 50.0.2 (#74).
+- LAN control is documented as **experimental**: it is validated only against
+  HTTP/protocol simulators because no tested firmware (5.4.7) advertises local
+  control. Offline startup remains unsupported (#76).
+
+### Validated
+- Native shutdown timers, verified power control, and bulk results on two live
+  hubs (firmware 5.4.7): the opt-in native 20-second timer regression passed
+  3/3 repetitions on each hub (2026-10-23), each confirming operational Off at
+  expiry with no settling polls, followed by a verified timed run and verified
+  off. No writable settings changed; no reboot was needed.
+
+### Known Limitation
+- Firmware 5.4.7 has intermittently reported Warming after native timer expiry
+  while the enable flag is false (joyfulhouse/thermacell_liv#30). Verified off
+  requires explicit integer operational Off evidence, so such reports fail
+  confirmation instead of passing silently. Cloud reports cannot prove physical
+  heater state, and the library never reboots a hub automatically.
+
 ## [0.3.0b5] - 2026-10-20
 
 ### Added

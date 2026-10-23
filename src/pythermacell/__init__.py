@@ -83,7 +83,7 @@ from pythermacell.resilience import (
 )
 
 
-__version__ = "0.3.0b5"
+__version__ = "0.3.0"
 
 __all__ = [
     "AuthenticationError",
